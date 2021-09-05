@@ -1,6 +1,7 @@
 #pragma once
 
-#include <unordered_map>
+#include <map>
+#include <array>
 
 #include <z3++.h>
 #include <capstone/capstone.h>
@@ -21,7 +22,7 @@ namespace x86 {
     XB(esi)					\
     XB(ebp)					\
     XB(esp)					\
-    XB(eip)					
+    XE(eip)					
 
 
 #define X_x86_FLAGS(XB, XE)			\
@@ -35,16 +36,46 @@ namespace x86 {
   XB(mem4)
 
   struct MemState {
-    z3::sort mem1_sort, mem2_sort, mem4_sort;
-    z3::expr mem1, mem2, mem4;
+#define ENT_(name) z3::expr name
+#define ENT(name) z3::expr name;
+    X_x86_MEMS(ENT, ENT_);
+#undef ENT
+#undef ENT
+    
+    struct Sort {
+      z3::func_decl cons;
+      z3::sort sort;
+      z3::func_decl_vector projs;
 
-    MemState(z3::context& ctx);
+      enum class Fields {
+	XM_LIST(X_x86_MEMS)
+      };
+
+      Sort(z3::context& ctx): cons(ctx), sort(ctx), projs(ctx) {
+	constexpr std::size_t size = 3;
+	const char *names[size] = { XM_STR_LIST(X_x86_MEMS) };
+	const auto memsort = [&] (unsigned bytes) -> z3::sort {
+	  return ctx.array_sort(ctx.bv_sort(32), ctx.bv_sort(bytes * 8));
+	};
+	const std::array<z3::sort, size> sorts = {memsort(1), memsort(2), memsort(4)};
+	cons = ctx.tuple_sort("x86_mem", size, names, sorts.data(), projs);
+	sort = cons.range();
+      }
+
+      MemState unpack(const z3::expr& e) const;
+      z3::expr pack(MemState& mem) const;
+
+    };
+
+    MemState(z3::context& ctx, const Sort& sort);
 
     const z3::expr& mem(unsigned size) const;
     z3::expr& mem(unsigned size);
 
-    z3::expr operator()(const z3::expr& address, unsigned size) const;
+    z3::expr read(const z3::expr& address, unsigned size) const;
     void write(const z3::expr& address, const z3::expr& value);
+
+    z3::context& ctx() const { return mem1.ctx(); }    
   };
 
   struct ArchState {
@@ -57,15 +88,9 @@ namespace x86 {
 
     MemState mem;
 
-#define ENT_(name) name(ctx)
-#define ENT(name) ENT_(name),
-    ArchState(z3::context& ctx): X_x86_REGS(ENT, ENT_) X_x86_FLAGS(ENT, ENT_), mem(ctx) {
-      zero();
-    }
-#undef ENT_
-#undef ENT
-
     struct Sort;
+    
+    ArchState(z3::context& ctx, const Sort& sort);
 
     z3::context& ctx() { return eax.ctx(); }
 
@@ -90,8 +115,12 @@ namespace x86 {
     z3::func_decl cons;
     z3::sort sort;
     z3::func_decl_vector projs;
+    MemState::Sort mem;
 
-    enum class Fields { XM_LIST(X_x86_REGS) };
+    enum class Fields {
+      XM_LIST(X_x86_REGS),
+      XM_LIST(X_x86_FLAGS)
+    };
     
     Sort(z3::context& ctx);
     
@@ -164,7 +193,9 @@ namespace x86 {
   struct Program {
     cs::handle handle {CS_ARCH_X86, CS_MODE_32};
     std::vector<cs::insns> insns;
-    std::unordered_map<addr_t, Inst> map;
+    std::map<addr_t, Inst> map;
+    using BasicBlock = std::vector<Inst>;
+    std::map<addr_t, BasicBlock> blocks;
 
     Program() {
       handle.detail(true);
@@ -186,7 +217,86 @@ namespace x86 {
     std::size_t disasm(const Container& container, uint32_t address) {
       return disasm(container.data(), container.size() * sizeof(container.data()[0]), address);
     }
-      
+
+    void compute_basic_blocks();
+  };
+
+  struct Context {
+    z3::context ctx;
+
+    ArchState::Sort arch_sort;
+    MemState::Sort mem_sort;
+
+    z3::expr archs;
+    z3::expr path;
+    const z3::expr idx;
+    const z3::expr zero;
+
+    unsigned next_id = 0;
+    z3::expr constant(const z3::sort& sort) {
+      return ctx.constant(std::to_string(next_id++).c_str(), sort);
+    }
+
+    ArchState unpack(const z3::expr& e) const { return arch_sort.unpack(e); }
+    z3::expr pack(ArchState& t) const { return arch_sort.pack(t); }
+
+    Context(): ctx(), arch_sort(ctx), mem_sort(ctx), archs(ctx), path(ctx), idx(ctx.int_const("idx")),
+	       zero(ctx.int_val(0)) {
+      archs = ctx.constant("archs", ctx.array_sort(ctx.int_sort(), arch_sort.sort));
+      path = ctx.constant("path", ctx.array_sort(ctx.int_sort(), ctx.bv_sort(32)));
+
+    }
+
+    static constexpr int max = 4;
+
+    z3::expr contains(const z3::expr& idx, int begin, int end) {
+      return idx >= ctx.int_val(begin) && idx < ctx.int_val(end);
+    }
+
+    void constrain_init(z3::solver& solver) {
+      solver.add(path[zero] == ctx.bv_val(0, 32), "init0");
+      ArchState arch_zero {ctx, arch_sort};
+      solver.add(archs[zero] == pack(arch_zero), "init1");
+    }
+
+    void constrain_path(z3::solver& solver) {
+      ArchState arch = unpack(archs[idx]);
+      const z3::expr next_pc = path[idx] == arch.eip;
+      const z3::expr f = z3::forall(idx, z3::implies(contains(idx, 0, max), next_pc));
+      solver.add(f, "path");
+    }
+
+    void constrain_transfer(z3::solver& solver, const Program& program) {
+      const z3::expr arch_in = archs[idx];
+
+      for (const auto& p : program.map) {
+	const auto addr = p.first;
+	const auto& inst = p.second;
+	ArchState arch = unpack(arch_in);
+	inst(arch);
+	const z3::expr arch_out = pack(arch);
+	const z3::expr transfer = z3::implies(path[idx] == ctx.bv_val(addr, 32),
+					      archs[idx + 1] == arch_out);
+	const z3::expr f = z3::forall(idx, z3::implies(contains(idx, 0, max), transfer));
+	std::stringstream ss;
+	ss << "transfer" << p.first;
+	solver.add(f, ss.str().c_str());
+      }
+    }
+
+    void constrain_pc(z3::solver& solver, const Program& program) {
+      // TODO
+    }
+
+    void constrain(z3::solver& solver, const Program& program) {
+      constrain_init(solver);
+      constrain_path(solver);
+      constrain_transfer(solver, program);
+      constrain_pc(solver, program);
+
+      solver.add(z3::exists(idx, contains(idx, 0, max) && unpack(archs[idx]).eax == 43));
+    }
+    
   };
 
 }

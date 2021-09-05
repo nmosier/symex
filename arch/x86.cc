@@ -7,19 +7,28 @@
 
 namespace x86 {
 
-  ArchState::Sort::Sort(z3::context& ctx): reg(ctx.bv_sort(32)), cons(ctx), sort(ctx), projs(ctx) {
-    constexpr std::size_t size = 10;
-    const char *names[size] = { XM_STR_LIST(X_x86_REGS) };
-    const std::vector<z3::sort> sorts {size, reg};
+  ArchState::Sort::Sort(z3::context& ctx): reg(ctx.bv_sort(32)), cons(ctx), sort(ctx), projs(ctx), mem(ctx) {
+    constexpr std::size_t nregs = XM_SIZE(X_x86_REGS);
+    constexpr std::size_t nflags = XM_SIZE(X_x86_FLAGS);
+    constexpr std::size_t size = nregs + nflags;
+    const char *names[size] = { XM_STR_LIST(X_x86_REGS), XM_STR_LIST(X_x86_FLAGS) };
+    std::vector<z3::sort> sorts;
+    for (std::size_t i = 0; i < nregs; ++i) {
+      sorts.push_back(reg);
+    }
+    for (std::size_t i = 0; i < nflags; ++i) {
+      sorts.push_back(ctx.bv_sort(1));
+    }
     cons = ctx.tuple_sort("x86_archstate", size, names, sorts.data(), projs);
     sort = cons.range();
   
   }
 
   ArchState ArchState::Sort::unpack(const z3::expr& e) const {
-    ArchState arch {e.ctx()};
+    ArchState arch {e.ctx(), *this};
 #define ENT(name) arch.name = projs[static_cast<unsigned>(Fields::name)](e);
     X_x86_REGS(ENT, ENT);
+    X_x86_FLAGS(ENT, ENT);
 #undef ENT
     return arch;
   }
@@ -29,8 +38,25 @@ namespace x86 {
 #define ENT_(name) v.push_back(arch.name)
 #define ENT(name) v.push_back(arch.name);
     X_x86_REGS(ENT, ENT_);
+    X_x86_FLAGS(ENT, ENT_);
 #undef ENT
 #undef ENT_
+    return cons(v);
+  }
+
+  MemState MemState::Sort::unpack(const z3::expr& e) const {
+    MemState mem {e.ctx(), *this};
+#define ENT(name) mem.name = projs[static_cast<unsigned>(Fields::name)](e);
+    X_x86_MEMS(ENT, ENT);
+#undef ENT
+    return mem;
+  }
+
+  z3::expr MemState::Sort::pack(MemState& mem) const {
+    z3::expr_vector v {mem.ctx()};
+#define ENT(name) v.push_back(mem.name);
+    X_x86_MEMS(ENT, ENT);
+#undef ENT
     return cons(v);
   }
 
@@ -58,7 +84,7 @@ namespace x86 {
 
   z3::expr MemoryOperand::operator()(ArchState& arch, unsigned size) const {
     const z3::expr addr = address(arch);
-    return arch.mem(addr, size);
+    return arch.mem.read(addr, size);
   }
 
   void MemoryOperand::operator()(ArchState& arch, const z3::expr& e) const {
@@ -134,13 +160,13 @@ namespace x86 {
       break;
 
     case X86_INS_RET:
-      arch.eip = arch.mem(arch.esp, 4);
+      arch.eip = arch.mem.read(arch.esp, 4);
       arch.esp = arch.esp + 4;
       break;
 
     case X86_INS_POP: {
       const Operand op {I->detail->x86.operands[0]};
-      op(arch, arch.mem(arch.esp, 4));
+      op(arch, arch.mem.read(arch.esp, 4));
       arch.esp = arch.esp + 4;
       break;
     }
@@ -248,19 +274,13 @@ namespace x86 {
   }
 
 
-  MemState::MemState(z3::context& ctx):
-    mem1_sort(ctx), mem2_sort(ctx), mem4_sort(ctx),
+  MemState::MemState(z3::context& ctx, const Sort& sort):
     mem1(ctx), mem2(ctx), mem4(ctx)
   {
-    const z3::sort bv8 = ctx.bv_sort(8);
-    const z3::sort bv16 = ctx.bv_sort(16);
-    const z3::sort bv32 = ctx.bv_sort(32);
-    mem1_sort = ctx.array_sort(bv32, bv8);
-    mem2_sort = ctx.array_sort(bv32, bv16);
-    mem4_sort = ctx.array_sort(bv32, bv32);
-    mem1 = ctx.constant("mem1", mem1_sort);
-    mem2 = ctx.constant("mem2", mem2_sort);
-    mem4 = ctx.constant("mem4", mem4_sort);
+#define ENT(name)							\
+    name = ctx.constant(#name, sort.projs[(unsigned) Sort::Fields::name].range());
+    X_x86_MEMS(ENT, ENT);
+#undef ENT
   }
   
   const z3::expr& MemState::mem(unsigned size) const {
@@ -276,7 +296,7 @@ namespace x86 {
     return const_cast<z3::expr&>(const_cast<const MemState&>(*this).mem(size));
   }
 
-  z3::expr MemState::operator()(const z3::expr& address, unsigned size) const {
+  z3::expr MemState::read(const z3::expr& address, unsigned size) const {
     return mem(size)[address];
   }
 
@@ -320,6 +340,17 @@ namespace x86 {
     z3::expr& arr = mem(size);
     arr = z3::store(arr, address, value);
   }
+
+
+#define ENT_(name) name(ctx)
+#define ENT(name) ENT_(name),
+  ArchState::ArchState(z3::context& ctx, const Sort& sort):
+      X_x86_REGS(ENT, ENT_), X_x86_FLAGS(ENT, ENT_), mem(ctx, sort.mem) {
+      zero();
+    }
+#undef ENT_
+#undef ENT
   
+
 }
 
