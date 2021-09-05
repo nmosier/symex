@@ -8,6 +8,8 @@
 
 #include "xmacros.h"
 
+extern csh g_handle;
+
 namespace x86 {
 
 #define X_x86_REGS(XB, XE)			\
@@ -27,6 +29,24 @@ namespace x86 {
   XB(zf)					\
   XE(sf)
 
+#define X_x86_MEMS(XB, XE)			\
+  XB(mem1)						\
+  XB(mem2)						\
+  XB(mem4)
+
+  struct MemState {
+    z3::sort mem1_sort, mem2_sort, mem4_sort;
+    z3::expr mem1, mem2, mem4;
+
+    MemState(z3::context& ctx);
+
+    const z3::expr& mem(unsigned size) const;
+    z3::expr& mem(unsigned size);
+
+    z3::expr operator()(const z3::expr& address, unsigned size) const;
+    void write(const z3::expr& address, const z3::expr& value);
+  };
+
   struct ArchState {
 #define ENT_(name) z3::expr name
 #define ENT(name) ENT_(name);
@@ -35,15 +55,16 @@ namespace x86 {
 #undef ENT_
 #undef ENT
 
+    MemState mem;
 
 #define ENT_(name) name(ctx)
 #define ENT(name) ENT_(name),
-    ArchState(z3::context& ctx): X_x86_REGS(ENT, ENT_) X_x86_FLAGS(ENT, ENT_) {
+    ArchState(z3::context& ctx): X_x86_REGS(ENT, ENT_) X_x86_FLAGS(ENT, ENT_), mem(ctx) {
       zero();
     }
 #undef ENT_
 #undef ENT
-    
+
     struct Sort;
 
     z3::context& ctx() { return eax.ctx(); }
@@ -83,26 +104,19 @@ namespace x86 {
 
     Register(x86_reg reg): reg(reg) {}
 
-    z3::expr operator()(ArchState& arch) const {
-      switch (reg) {
-      case X86_REG_EAX:
-	return arch.eax;
+    z3::expr operator()(ArchState& arch) const;
+    void operator()(ArchState& arch, const z3::expr& e) const;
+  };
 
-      default:
-	std::abort();
-      }
-    }
+  struct MemoryOperand {
+    const x86_op_mem& mem;
 
-    void operator()(ArchState& arch, const z3::expr& e) const {
-      switch (reg) {
-      case X86_REG_EAX:
-	arch.eax = e;
-	break;
+    MemoryOperand(const x86_op_mem& mem): mem(mem) {}
 
-      default:
-	std::abort();
-      }
-    }
+    z3::expr operator()(ArchState& arch, unsigned size) const;
+    void operator()(ArchState& arch, const z3::expr& e) const;
+
+    z3::expr address(ArchState& arch) const;
   };
 
   struct Operand {
@@ -112,6 +126,9 @@ namespace x86 {
     
     z3::expr operator()(ArchState& arch) const;
     void operator()(ArchState& arch, const z3::expr& e) const;
+
+    unsigned size() const { return op.size; }
+    unsigned bits() const { return size() * 8; }
   };
 
   struct Inst {
@@ -135,6 +152,10 @@ namespace x86 {
     }
 
     void transfer_acc_src(ArchState& arch) const;
+    void transfer_acc_src_arith(ArchState& arch, z3::context& ctx, const z3::expr& acc,
+				const z3::expr& src, unsigned bits, z3::expr& res) const;    
+    void transfer_acc_src_logic(ArchState& arch, z3::context& ctx, const z3::expr& acc,
+				const z3::expr& src, z3::expr& res) const;
     
   };
 

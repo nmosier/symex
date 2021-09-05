@@ -8,6 +8,8 @@
 
 #include <z3++.h>
 
+#include "arch/x86.h"
+
 struct Program;
 
 // helper type for the visitor #4
@@ -57,6 +59,11 @@ struct ArchStateSort {
   }  
 };
 
+/* New approach:
+ * We aren't currently exploiting what we know in the CFG.
+ * What we should do is condense the CFG into basic blocks and process those as a unit. 
+ */
+
 struct Context {
   z3::context ctx;
   ArchStateSort archstate_sort;
@@ -75,7 +82,7 @@ struct Context {
   
   Context(): ctx(), archstate_sort(ctx, ctx.int_sort()), archs(ctx), path(ctx),
 	     idx(ctx.int_const("idx")),
-		 zero(ctx.int_val(0)) {
+	     zero(ctx.int_val(0)) {
     constexpr unsigned arity = 1;
     const z3::sort domain[arity] = {ctx.int_sort()};
     const z3::sort range = archstate_sort.sort;
@@ -93,7 +100,7 @@ struct Context {
     solver.add(path(zero) == zero, "init0");
     solver.add(archs(zero) == pack(ArchState {zero, zero, zero}), "init1");
   }
-
+  
   void constrain_transfer(z3::solver& solver, const Program& program);
 
   void constrain_path(z3::solver& solver) {
@@ -117,101 +124,101 @@ struct Context {
     // solver.add(!z3::forall(idx, z3::implies(in_range(idx, 0, max), out(idx) == pack(ArchState {zero, zero, zero}))));
     solver.add(z3::exists(idx, in_range(idx, 0, max) && unpack(archs(idx)).acc == 13));
   }
- };
+};
 
- struct RegBase {};
- struct ACC: RegBase {
-   z3::expr operator()(const ArchState& archstate) const {
-     return archstate.acc;
-   }
- };
- struct BAK: RegBase {
-   z3::expr operator()(const ArchState& archstate) const {
-     return archstate.bak;
-   }
- };
- struct Reg: std::variant<ACC, BAK> {
-   z3::expr operator()(const ArchState& archstate) const {
-     return std::visit([&] (const auto& x) -> z3::expr {
-       return x(archstate);
-     }, *this);
-   }
- };
+struct RegBase {};
+struct ACC: RegBase {
+  z3::expr operator()(const ArchState& archstate) const {
+    return archstate.acc;
+  }
+};
+struct BAK: RegBase {
+  z3::expr operator()(const ArchState& archstate) const {
+    return archstate.bak;
+  }
+};
+struct Reg: std::variant<ACC, BAK> {
+  z3::expr operator()(const ArchState& archstate) const {
+    return std::visit([&] (const auto& x) -> z3::expr {
+      return x(archstate);
+    }, *this);
+  }
+};
 
- using Int = int;
- struct Operand: std::variant<Int, Reg> {
-   z3::expr operator()(z3::context& ctx, const ArchState& archstate) const {
-     return std::visit(overloaded {
+using Int = int;
+struct Operand: std::variant<Int, Reg> {
+  z3::expr operator()(z3::context& ctx, const ArchState& archstate) const {
+    return std::visit(overloaded {
  	[&] (Int i) { return ctx.int_val(i); },
  	[&] (const Reg& r) { return r(archstate); },
-       }, *this);
-   }
- };
+      }, *this);
+  }
+};
 
- struct InstBase {
-   void inc_pc(z3::context& ctx, ArchState& arch) const {
-     arch.pc = arch.pc + 1;
-   }
- };
+struct InstBase {
+  void inc_pc(z3::context& ctx, ArchState& arch) const {
+    arch.pc = arch.pc + 1;
+  }
+};
 
- struct SourceInstBase: InstBase {
-   Operand src;
-   SourceInstBase(const Operand& src): src(src) {}
- };
+struct SourceInstBase: InstBase {
+  Operand src;
+  SourceInstBase(const Operand& src): src(src) {}
+};
 
- struct MOV: SourceInstBase {
-   MOV(const Operand& src): SourceInstBase(src) {}
-   void operator()(z3::context& ctx, ArchState& arch) const {
-     arch.acc = src(ctx, arch);
-     inc_pc(ctx, arch);
-   }
- };
+struct MOV: SourceInstBase {
+  MOV(const Operand& src): SourceInstBase(src) {}
+  void operator()(z3::context& ctx, ArchState& arch) const {
+    arch.acc = src(ctx, arch);
+    inc_pc(ctx, arch);
+  }
+};
 
- struct ADD: SourceInstBase {
-   ADD(const Operand& src): SourceInstBase(src) {}
-   void operator()(z3::context& ctx, ArchState& arch) const {
-     arch.acc = arch.acc + src(ctx, arch);
-     inc_pc(ctx, arch);
-   }
- };
+struct ADD: SourceInstBase {
+  ADD(const Operand& src): SourceInstBase(src) {}
+  void operator()(z3::context& ctx, ArchState& arch) const {
+    arch.acc = arch.acc + src(ctx, arch);
+    inc_pc(ctx, arch);
+  }
+};
 
- struct SourceInst: std::variant<MOV, ADD> {
-   void operator()(z3::context& ctx, ArchState& arch) const {
-     std::visit([&] (const auto& x) { x(ctx, arch); }, *this);
-   }
- };
+struct SourceInst: std::variant<MOV, ADD> {
+  void operator()(z3::context& ctx, ArchState& arch) const {
+    std::visit([&] (const auto& x) { x(ctx, arch); }, *this);
+  }
+};
 
- struct SWP: InstBase {
-   void operator()(z3::context& ctx, ArchState& arch) const {
-     std::swap(arch.acc, arch.bak);
-     inc_pc(ctx, arch);
-   }
- };
+struct SWP: InstBase {
+  void operator()(z3::context& ctx, ArchState& arch) const {
+    std::swap(arch.acc, arch.bak);
+    inc_pc(ctx, arch);
+  }
+};
 
- struct NEG: InstBase {
-   void operator()(z3::context& ctx, ArchState& arch) const {
-     arch.acc = -arch.acc;
-     inc_pc(ctx, arch);
-   }
- };
- #if 0
- struct CMP: InstBase {
-   void operator()(z3::context& ctx, ArchState& arch) const {
-     arch.acc = z3::ite(arch.acc < arch.bak, -1,
+struct NEG: InstBase {
+  void operator()(z3::context& ctx, ArchState& arch) const {
+    arch.acc = -arch.acc;
+    inc_pc(ctx, arch);
+  }
+};
+#if 0
+struct CMP: InstBase {
+  void operator()(z3::context& ctx, ArchState& arch) const {
+    arch.acc = z3::ite(arch.acc < arch.bak, -1,
  		       z3::ite(arch.acc == arch.bak, ctx.int_val(0),
  			       ctx.int_val(1)));
-     inc_pc(ctx, arch);
-   }
- };
- #endif
+    inc_pc(ctx, arch);
+  }
+};
+#endif
 
- struct JumpInstBase: InstBase {
-   int pc;
-   JumpInstBase(int pc): pc(pc) {}
-   void transfer(z3::context& ctx, ArchState& arch, const z3::expr& cond) const {
-     arch.pc = z3::ite(cond, ctx.int_val(pc), arch.pc + 1);
-   }
- };
+struct JumpInstBase: InstBase {
+  int pc;
+  JumpInstBase(int pc): pc(pc) {}
+  void transfer(z3::context& ctx, ArchState& arch, const z3::expr& cond) const {
+    arch.pc = z3::ite(cond, ctx.int_val(pc), arch.pc + 1);
+  }
+};
 
 struct JMP: JumpInstBase {
   JMP(int pc): JumpInstBase(pc) {}
@@ -220,198 +227,230 @@ struct JMP: JumpInstBase {
   }
 };
 
- struct JLT: JumpInstBase {
-   JLT(int pc): JumpInstBase(pc) {}
-   void operator()(z3::context& ctx, ArchState& arch) const {
-     transfer(ctx, arch, arch.acc < 0);
-   }
- };
- struct JEQ: JumpInstBase {
-   JEQ(int pc): JumpInstBase(pc) {}
-   void operator()(z3::context& ctx, ArchState& arch) const {
-     transfer(ctx, arch, arch.acc == 0);
-   }
- };
- struct JGT: JumpInstBase {
-   JGT(int pc): JumpInstBase(pc) {}
-   void operator()(z3::context& ctx, ArchState& arch) const {
-     transfer(ctx, arch, arch.acc > 0);
-   }
- };
+struct JLT: JumpInstBase {
+  JLT(int pc): JumpInstBase(pc) {}
+  void operator()(z3::context& ctx, ArchState& arch) const {
+    transfer(ctx, arch, arch.acc < 0);
+  }
+};
+struct JEQ: JumpInstBase {
+  JEQ(int pc): JumpInstBase(pc) {}
+  void operator()(z3::context& ctx, ArchState& arch) const {
+    transfer(ctx, arch, arch.acc == 0);
+  }
+};
+struct JGT: JumpInstBase {
+  JGT(int pc): JumpInstBase(pc) {}
+  void operator()(z3::context& ctx, ArchState& arch) const {
+    transfer(ctx, arch, arch.acc > 0);
+  }
+};
 
 struct JumpInst: std::variant<JMP, JLT, JEQ, JGT> {
-   void operator()(z3::context& ctx, ArchState& arch) const {
-     std::visit([&] (const auto& x) { x(ctx, arch); }, *this);
-   }
- };
+  void operator()(z3::context& ctx, ArchState& arch) const {
+    std::visit([&] (const auto& x) { x(ctx, arch); }, *this);
+  }
+};
 
- struct FIN: InstBase {
-   void operator()(z3::context& ctx, ArchState& arch) const {
-     // NOP
-   }
- };
+struct FIN: InstBase {
+  void operator()(z3::context& ctx, ArchState& arch) const {
+    // NOP
+  }
+};
 
- struct Inst: std::variant<SourceInst, SWP, NEG, JumpInst, FIN> {
-   void operator()(z3::context& ctx, ArchState& arch) const {
-     std::visit([&] (const auto& x) { x(ctx, arch); }, *this);
-   }
- };
+struct Inst: std::variant<SourceInst, SWP, NEG, JumpInst, FIN> {
+  void operator()(z3::context& ctx, ArchState& arch) const {
+    std::visit([&] (const auto& x) { x(ctx, arch); }, *this);
+  }
+};
 
- struct Program {
-   std::vector<Inst> insts;
- };
+struct Program {
+  std::vector<Inst> insts;
+  using BasicBlock = std::vector<Inst>;
+  std::vector<BasicBlock> blocks;
 
- std::optional<Reg> make_reg(const std::string& operand) {
-   if (operand == "ACC") {
-     return Reg {ACC {}};
-   } else if (operand == "BAK") {
-     return Reg {BAK {}};
-   } else {
-     return std::nullopt;
-   }
- }
+  void set_blocks() {
+    BasicBlock bb;
+    for (std::size_t i = 0; i < insts.size(); ++i) {
+      const Inst& inst = insts.at(i);
+      bb.push_back(inst);
+      if (std::holds_alternative<JumpInst>(inst)) {
+	blocks.push_back(std::move(bb));
+      }
+    }
+  }
+};
 
- std::optional<int> make_int(const std::string& s) {
-   char *end;
-   const int res = strtol(s.c_str(), &end, 0);
-   if (*end || s.empty()) {
-     return std::nullopt;
-   } else {
-     return res;
-   }
- }
+std::optional<Reg> make_reg(const std::string& operand) {
+  if (operand == "ACC") {
+    return Reg {ACC {}};
+  } else if (operand == "BAK") {
+    return Reg {BAK {}};
+  } else {
+    return std::nullopt;
+  }
+}
 
- std::optional<Operand> make_operand(const std::string& operand) {
-   if (const auto reg = make_reg(operand)) {
-     return Operand {*reg};
-   } else if (const auto num = make_int(operand)) {
-     return Operand {*num};
-   } else {
-     return std::nullopt;
-   }
- }
+std::optional<int> make_int(const std::string& s) {
+  char *end;
+  const int res = strtol(s.c_str(), &end, 0);
+  if (*end || s.empty()) {
+    return std::nullopt;
+  } else {
+    return res;
+  }
+}
 
-
- std::optional<SourceInst> make_source_inst(const std::string& opcode, const std::string& operand) {
-   if (const auto op = make_operand(operand)) {
-     if (opcode == "MOV") {
-       return SourceInst {MOV {*op}};
-     } else if (opcode == "ADD") {
-       return SourceInst {ADD {*op}};
-     } else {
-       return std::nullopt;
-     }
-   } else {
-     return std::nullopt;
-   }
- }
-
- std::optional<JumpInst> make_jump_inst(const std::string& opcode, const std::string& operand) {
-   if (const auto pc = make_int(operand)) {
-     if (opcode == "JMP") {
-       return JumpInst {JMP {*pc}};
-     } else if (opcode == "JLT") {
-       return JumpInst {JLT {*pc}};
-     } else if (opcode == "JEQ") {
-       return JumpInst {JEQ {*pc}};
-     } else if (opcode == "JGT") {
-       return JumpInst {JGT {*pc}};
-     } else {
-       return std::nullopt;
-     }
-   } else {
-     return std::nullopt;
-   }
- }
-
- std::optional<Inst> make_inst(const std::string& opcode, const std::string& operand) {
-   if (const auto source_inst = make_source_inst(opcode, operand)) {
-     return Inst {*source_inst};
-   } else if (opcode == "SWP") {
-     return Inst {SWP {}};
-   } else if (opcode == "NEG") {
-     return Inst {NEG {}};
- #if 0
-   } else if (opcode == "CMP") {
-     return Inst {CMP {}};
- #endif
-   } else if (const auto jump_inst = make_jump_inst(opcode, operand)) {
-     return Inst {*jump_inst};
-   } else if (opcode == "FIN") {
-     return Inst {FIN {}};
-   } else {
-     return std::nullopt;
-   }
- }
+std::optional<Operand> make_operand(const std::string& operand) {
+  if (const auto reg = make_reg(operand)) {
+    return Operand {*reg};
+  } else if (const auto num = make_int(operand)) {
+    return Operand {*num};
+  } else {
+    return std::nullopt;
+  }
+}
 
 
- /*** CFG CONSTRUCTION ***/
- using NodeRef = unsigned;
- class CFG {
- public:
-   using Rel = std::unordered_map<NodeRef, std::unordered_set<NodeRef>>;
-   Rel fwd;
-   Rel rev;
+std::optional<SourceInst> make_source_inst(const std::string& opcode, const std::string& operand) {
+  if (const auto op = make_operand(operand)) {
+    if (opcode == "MOV") {
+      return SourceInst {MOV {*op}};
+    } else if (opcode == "ADD") {
+      return SourceInst {ADD {*op}};
+    } else {
+      return std::nullopt;
+    }
+  } else {
+    return std::nullopt;
+  }
+}
 
-   void add_edge(NodeRef src, NodeRef dst) {
-     fwd[src].insert(dst);
-     rev[dst].insert(src);
-   }
+std::optional<JumpInst> make_jump_inst(const std::string& opcode, const std::string& operand) {
+  if (const auto pc = make_int(operand)) {
+    if (opcode == "JMP") {
+      return JumpInst {JMP {*pc}};
+    } else if (opcode == "JLT") {
+      return JumpInst {JLT {*pc}};
+    } else if (opcode == "JEQ") {
+      return JumpInst {JEQ {*pc}};
+    } else if (opcode == "JGT") {
+      return JumpInst {JGT {*pc}};
+    } else {
+      return std::nullopt;
+    }
+  } else {
+    return std::nullopt;
+  }
+}
 
-   std::vector<Inst> nodes;
+std::optional<Inst> make_inst(const std::string& opcode, const std::string& operand) {
+  if (const auto source_inst = make_source_inst(opcode, operand)) {
+    return Inst {*source_inst};
+  } else if (opcode == "SWP") {
+    return Inst {SWP {}};
+  } else if (opcode == "NEG") {
+    return Inst {NEG {}};
+#if 0
+  } else if (opcode == "CMP") {
+    return Inst {CMP {}};
+#endif
+  } else if (const auto jump_inst = make_jump_inst(opcode, operand)) {
+    return Inst {*jump_inst};
+  } else if (opcode == "FIN") {
+    return Inst {FIN {}};
+  } else {
+    return std::nullopt;
+  }
+}
 
-   Inst& operator[](NodeRef ref) { return nodes.at(ref); }
-   const Inst& operator[](NodeRef ref) const { return nodes.at(ref); }
 
-   NodeRef add_node(const Inst& inst) {
-     nodes.push_back(inst);
-     return nodes.size() - 1;
-   }
+/*** CFG CONSTRUCTION ***/
+using NodeRef = unsigned;
 
- private:
- };
+class CFG {
+public:
+  using NodeRefSet = std::unordered_set<NodeRef>;
+  using Rel = std::unordered_map<NodeRef, NodeRefSet>;
+  Rel fwd;
+  Rel rev;
 
- // util: convert variant to base type
- template <typename T, typename... Ts>
- const T *variant_static_cast(const std::variant<Ts...> *v) {
-   return std::visit([] (const auto& v) {
-     return &static_cast<const T&>(v);
-   }, *v);
- }
+  void add_edge(NodeRef src, NodeRef dst) {
+    fwd[src].insert(dst);
+    rev[dst].insert(src);
+  }
 
- CFG construct_cfg(const Program& prog) {
-   CFG cfg;
-   for (const Inst& inst : prog.insts) {
-     const NodeRef cur = cfg.add_node(inst);
-     if (const auto *jump = std::get_if<JumpInst>(&inst)) {
-       const auto pc = variant_static_cast<JumpInstBase>(jump)->pc;
-       cfg.add_edge(cur, pc);
-       cfg.add_edge(cur, cur + 1);
-     } else if (const auto *fin = std::get_if<FIN>(&inst)) {
-       // nothing
-     } else {
-       cfg.add_edge(cur, cur + 1);
-     }
-   }
-   return cfg;
- }
+  std::vector<Inst> nodes;
 
- // SMT INSTRUCTION SEMANTICS
+  Inst& operator[](NodeRef ref) { return nodes.at(ref); }
+  const Inst& operator[](NodeRef ref) const { return nodes.at(ref); }
 
- void Context::constrain_transfer(z3::solver& solver, const Program& program) {
-   const z3::expr arch_in = archs(idx);
+  NodeRef add_node(const Inst& inst) {
+    nodes.push_back(inst);
+    return nodes.size() - 1;
+  }
 
-   for (std::size_t i = 0; i < program.insts.size(); ++i) {
-     ArchState arch = unpack(arch_in);
-     const Inst& inst = program.insts[i];
-     inst(ctx, arch);
-     const z3::expr arch_out = pack(arch);
-     std::cerr << "arch_in: " << arch_in << "\n" << "arch_out: " << arch_out << "\n";
-     std::cerr << "arch: " << arch << "\n";
-     const z3::expr transfer = z3::implies(path(idx) == ctx.int_val(static_cast<int>(i)), archs(idx + 1) == arch_out);
-     solver.add(z3::forall(idx, z3::implies(in_range(idx, 0, max), transfer)),
-		(std::string("transfer") + std::to_string(i)).c_str());
-   }
+  template <typename OutputIt>
+  OutputIt basic_blocks(OutputIt out) const {
+    for (NodeRef ref = 0; ref < nodes.size(); ) {
+      std::vector<NodeRef> block;
+      while (true) {
+	block.push_back(ref);
+	const auto& succs = fwd.at(ref);
+	++ref;
+	if (succs != NodeRefSet {ref}) {
+	  break;
+	}
+      }
+      *out++ = std::move(block);
+    }
+    return out;
+  }
+
+private:
+};
+
+// util: convert variant to base type
+template <typename T, typename... Ts>
+const T *variant_static_cast(const std::variant<Ts...> *v) {
+  return std::visit([] (const auto& v) {
+    return &static_cast<const T&>(v);
+  }, *v);
+}
+
+CFG construct_cfg(const Program& prog) {
+  CFG cfg;
+  for (const Inst& inst : prog.insts) {
+    const NodeRef cur = cfg.add_node(inst);
+    if (const auto *jump = std::get_if<JumpInst>(&inst)) {
+      const auto pc = variant_static_cast<JumpInstBase>(jump)->pc;
+      cfg.add_edge(cur, pc);
+      cfg.add_edge(cur, cur + 1);
+    } else if (const auto *fin = std::get_if<FIN>(&inst)) {
+      // nothing
+    } else {
+      cfg.add_edge(cur, cur + 1);
+    }
+  }
+  return cfg;
+}
+
+// SMT INSTRUCTION SEMANTICS
+
+void Context::constrain_transfer(z3::solver& solver, const Program& program) {
+  const z3::expr arch_in = archs(idx);
+
+  for (std::size_t i = 0; i < program.insts.size(); ++i) {
+    ArchState arch = unpack(arch_in);
+    const Inst& inst = program.insts[i];
+    inst(ctx, arch);
+    const z3::expr arch_out = pack(arch);
+    std::cerr << "arch_in: " << arch_in << "\n" << "arch_out: " << arch_out << "\n";
+    std::cerr << "arch: " << arch << "\n";
+    const z3::expr transfer = z3::implies(path(idx) == ctx.int_val(static_cast<int>(i)), archs(idx + 1) == arch_out);
+    solver.add(z3::forall(idx, z3::implies(in_range(idx, 0, max), transfer)),
+	       (std::string("transfer") + std::to_string(i)).c_str());
+  }
 }
 
 void Context::constrain_pc(z3::solver& solver, const Program& program) {
@@ -452,9 +491,10 @@ int main(int argc, char *argv[]) {
   }
 
   std::cout << "Parsed " << program.insts.size() << " instructions\n";
+  program.set_blocks();
 
   CFG cfg = construct_cfg(program);
-
+  
   Context ctx;
 
   // IN, OUT maps
