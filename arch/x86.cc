@@ -185,6 +185,12 @@ namespace x86 {
       arch.eip = op(arch);
       break;
     }
+
+    case X86_INS_JMP: {
+      const Operand op {I->detail->x86.operands[0]};
+      arch.eip = arch.eip + I->size + op(arch);
+      break;
+    }
       
     default:
       unimplemented("%s", I->mnemonic);

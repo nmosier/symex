@@ -247,7 +247,7 @@ namespace x86 {
 
     }
 
-    static constexpr int max = 4;
+    static constexpr int max = 16;
 
     z3::expr contains(const z3::expr& idx, int begin, int end) {
       return idx >= ctx.int_val(begin) && idx < ctx.int_val(end);
@@ -294,7 +294,7 @@ namespace x86 {
       constrain_transfer(solver, program);
       constrain_pc(solver, program);
 
-      solver.add(z3::exists(idx, contains(idx, 0, max) && unpack(archs[idx]).eax == 43));
+      solver.add(z3::exists(idx, contains(idx, 0, max) && unpack(archs[idx]).eax == 4));
     }
     
   };
