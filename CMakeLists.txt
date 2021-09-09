@@ -6,8 +6,8 @@ include(FindPkgConfig)
 pkg_check_modules(CAPSTONE REQUIRED capstone)
 
 # find_package(Z3)
-set(Z3_LIBRARIES /usr/local/lib/libz3.dylib)
-set(Z3_INCLUDE_DIRS /usr/local/include)
+set(Z3_LIBRARIES /opt/homebrew/lib/libz3.dylib)
+set(Z3_INCLUDE_DIRS /opt/homebrew/include)
 
 set(CMAKE_CXX_STANDARD 17)
 
