@@ -2,12 +2,15 @@
 
 #include <map>
 #include <array>
+#include <unordered_map>
+#include <unordered_set>
 
 #include <z3++.h>
 #include <capstone/capstone.h>
 #include "capstone++.h"
 
 #include "xmacros.h"
+#include "util.h"
 
 extern csh g_handle;
 
@@ -170,6 +173,46 @@ namespace x86 {
 
     void transfer(ArchState& arch) const;
 
+    bool has_multiple_exits() const {
+      static const std::unordered_set<x86_insn> always_yes = {
+	X86_INS_JAE,
+	X86_INS_JA,
+	X86_INS_JBE,
+	X86_INS_JB,
+	X86_INS_JCXZ,
+	X86_INS_JECXZ,
+	X86_INS_JE,
+	X86_INS_JGE,
+	X86_INS_JG,
+	X86_INS_JLE,
+	X86_INS_JL,
+	X86_INS_JNE,
+	X86_INS_JNO,
+	X86_INS_JNP,
+	X86_INS_JNS,
+	X86_INS_JO,
+	X86_INS_JP,
+	X86_INS_JRCXZ,
+	X86_INS_JS,
+	X86_INS_RET,
+      };
+      if (always_yes.find(I->id) != always_yes.end()) {
+	return true;
+      }
+
+      static const std::unordered_set<x86_insn> maybe_yes = {
+	X86_INS_JMP,
+	X86_INS_CALL,
+      };
+      if (maybe_yes.find(I->id) != maybe_yes.end()) {
+	x86->operands[0].type
+      }
+      
+      switch (I->id) {
+      
+      }
+    }
+
   private:
     z3::expr bool_to_bv(z3::context& ctx, const z3::expr& pred, unsigned n) const {
       return z3::ite(pred, ctx.bv_val(1, n), ctx.bv_val(0, n));
@@ -219,6 +262,41 @@ namespace x86 {
     }
 
     void compute_basic_blocks();
+  };
+
+  struct CFG {
+    using Rel = std::unordered_map<addr_t, std::unordered_set<addr_t>>;
+    Rel fwd;
+    Rel rev;
+
+    void add_edge(addr_t src, addr_t dst) {
+      fwd[src].insert(dst);
+      fwd[dst].insert(src);
+    }
+
+    CFG(const Program& prog) {
+      add_program(prog);
+    }
+
+    void add_program(const Program& prog) {
+#if 0
+      for (const auto& p : prog.map) {
+	addr_t src = p.first;
+	const auto *I = p.second.I;
+	std::optional<addr_t> dst;
+	switch (I->id) {
+	case X86_INS_JMP: {
+	  const auto& op = I->detail->x86.operands[0];
+	  if (op.type == X86_OP_IMM) {
+	    
+	  }
+
+	default: unimplemented("%s", I->mnemonic);
+	}
+	}
+      }
+#endif
+    }
   };
 
   struct Context {
@@ -295,6 +373,16 @@ namespace x86 {
       constrain_pc(solver, program);
 
       solver.add(z3::exists(idx, contains(idx, 0, max) && unpack(archs[idx]).eax == 4));
+    }
+
+
+    void explore_paths(const Program& program) {
+      z3::solver solver {ctx};
+    }
+
+    void explore_paths_rec(const Program& program, z3::solver& solver, addr_t addr) {
+      // add instructions until branch
+      
     }
     
   };
