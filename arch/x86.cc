@@ -162,7 +162,7 @@ void Inst::transfer(ArchState& arch) const {
             break;
             
         case X86_INS_RET:
-            arch.eip = arch.mem.read(arch.esp, 4);
+            eip = arch.mem.read(arch.esp, 4);
             arch.esp = arch.esp + 4;
             break;
             
@@ -195,7 +195,12 @@ void Inst::transfer(ArchState& arch) const {
         }
             
         case X86_INS_JE:
-            transfer_jcc(arch, arch.ctx());
+            transfer_jcc(arch, ctx);
+            eip = arch.eip;
+            break;
+            
+        case X86_INS_STOSD:
+            transfer_string(arch, ctx);
             break;
             
         default:
@@ -299,8 +304,8 @@ void Inst::transfer_acc_src(ArchState& arch) const {
 
 void Inst::transfer_jcc(ArchState& arch, z3::context& ctx) const {
     const Operand op {I->detail->x86.operands[0]};
-    const z3::expr rel = op(arch);
-    const z3::expr base = arch.eip + ctx.bv_val(I->size, 32);
+    const z3::expr taken = op(arch);
+    const z3::expr not_taken = arch.eip + ctx.bv_val(I->size, 32);
     z3::expr cond {ctx};
     switch (I->id) {
         case X86_INS_JE:
@@ -310,7 +315,21 @@ void Inst::transfer_jcc(ArchState& arch, z3::context& ctx) const {
             unimplemented("jcc %s", I->mnemonic);
     }
     
-    arch.eip = z3::ite(cond, base + rel, base);
+    arch.eip = z3::ite(cond, taken, not_taken);
+}
+
+void Inst::transfer_string(ArchState& arch, z3::context& ctx) const {
+    z3::expr src {ctx};
+    switch (I->id) {
+        case X86_INS_STOSD:
+            src = arch.eax;
+            break;
+        default:
+            unimplemented("string %s", I->mnemonic);
+    }
+    const unsigned bytes = src.get_sort().bv_size() / 8;
+    arch.mem.write(arch.edi, src);
+    arch.edi = arch.edi + ctx.bv_val(bytes, 32);
 }
 
 std::ostream& operator<<(std::ostream& os, const ArchState& arch) {
@@ -372,7 +391,9 @@ void Register::operator()(ArchState& arch, const z3::expr& e) const {
     switch (reg) {
         case X86_REG_EAX: arch.eax = e; break;
         case X86_REG_ECX: arch.ecx = e; break;
+        case X86_REG_EDX: arch.edx = e; break;
             
+        case X86_REG_EDI: arch.edi = e; break;
         case X86_REG_ESI: arch.esi = e; break;
             
         case X86_REG_EBP: arch.ebp = e; break;

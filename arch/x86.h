@@ -240,6 +240,7 @@ private:
     void transfer_acc_src_logic(ArchState& arch, z3::context& ctx, const z3::expr& acc,
                                 const z3::expr& src, unsigned bits, z3::expr& res) const;
     void transfer_jcc(ArchState& arch, z3::context& ctx) const;
+    void transfer_string(ArchState& arch, z3::context& ctx) const;
     
 };
 
@@ -408,6 +409,9 @@ struct Context {
         X_x86_FLAGS(ENT, ENT);
 #undef ENT
         
+        // set return address
+        in_arch.mem.write(in_arch.esp, ctx.bv_val(0x42424242, 32));
+        
         explore_paths_rec(program, in_arch, solver, state.__eip);
     }
     
@@ -415,47 +419,49 @@ struct Context {
         // add instructions until branch
         
         solver.push();
-        
-        solver.add(ctx.bv_val(addr, 32) == in_arch.eip);
-        
-        if (program.map.find(addr) == program.map.end()) {
-            // find address in core
-            const auto seg_it = std::find_if(core.segments_begin(), core.segments_end(), [&] (const cores::Segment& seg) {
-                return seg.contains(addr, 1);
-            });
-            if (seg_it == core.segments_end()) {
-                std::cerr << "jump outside of address space\n";
-                std::abort();
-            }
-            // TODO: make this safer
-            const void *data = seg_it->at(addr);
-            program.disasm((const uint8_t *) data, 16, addr, 1);
-        }
-        
-        const Inst& inst = program.map.at(addr);
-        
-        ArchState arch = in_arch;
-        inst.transfer(arch);
-        ArchState out_arch = arch;
-        out_arch.create(next_id++);
-        solver.add(out_arch == arch);
-        
-        std::cerr << "inst @ " << std::hex << addr << " : "  << inst.I->mnemonic << " " << inst.I->op_str << "\n";
-        
-        while (true) {
-            const auto res = solver.check();
-            if (res != z3::sat) {
-                break;
-            }
-            const auto model = solver.get_model();
-            const auto eip = model.eval(out_arch.eip);
-            std::cerr << "eip = " << eip << "\n";
+        {
+            solver.add(ctx.bv_val(addr, 32) == in_arch.eip);
             
-            explore_paths_rec(program, out_arch, solver, eip.as_int64());
+            if (program.map.find(addr) == program.map.end()) {
+                // find address in core
+                const auto seg_it = std::find_if(core.segments_begin(), core.segments_end(), [&] (const cores::Segment& seg) {
+                    return seg.contains(addr, 1);
+                });
+                if (seg_it == core.segments_end()) {
+                    std::cerr << "jump outside of address space: " << std::hex << addr << "\n";
+                    goto done;
+                }
+                // TODO: make this safer
+                const void *data = seg_it->at(addr);
+                program.disasm((const uint8_t *) data, 16, addr, 1);
+            }
             
-            solver.add(out_arch.eip != eip);
+            const Inst& inst = program.map.at(addr);
+            
+            ArchState arch = in_arch;
+            inst.transfer(arch);
+            ArchState out_arch = arch;
+            out_arch.create(next_id++);
+            solver.add(out_arch == arch);
+            
+            std::cerr << "inst @ " << std::hex << addr << " : "  << inst.I->mnemonic << " " << inst.I->op_str << "\n";
+            
+            while (true) {
+                const auto res = solver.check();
+                if (res != z3::sat) {
+                    break;
+                }
+                const auto model = solver.get_model();
+                const auto eip = model.eval(out_arch.eip);
+                std::cerr << "eip = " << eip << "\n";
+                
+                explore_paths_rec(program, out_arch, solver, eip.as_int64());
+                
+                solver.add(out_arch.eip != eip);
+            }
+            
         }
-        
+    done:
         solver.pop();
     }
     
