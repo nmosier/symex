@@ -44,22 +44,6 @@ z3::expr ArchState::Sort::pack(ArchState& arch) const {
     return cons(v);
 }
 
-MemState MemState::Sort::unpack(const z3::expr& e) const {
-    MemState mem {e.ctx(), *this};
-#define ENT(name) mem.name = projs[static_cast<unsigned>(Fields::name)](e);
-    X_x86_MEMS(ENT, ENT);
-#undef ENT
-    return mem;
-}
-
-z3::expr MemState::Sort::pack(MemState& mem) const {
-    z3::expr_vector v {mem.ctx()};
-#define ENT(name) v.push_back(mem.name);
-    X_x86_MEMS(ENT, ENT);
-#undef ENT
-    return cons(v);
-}
-
 // TRANSFER FUNCTIONS
 
 z3::expr MemoryOperand::address(ArchState& arch) const {
@@ -341,29 +325,50 @@ std::ostream& operator<<(std::ostream& os, const ArchState& arch) {
 }
 
 
-MemState::MemState(z3::context& ctx, const Sort& sort): mem(ctx) {
-    mem = ctx.array_sort(ctx.bv_sort(32 - 2), ctx.bv_sort(32));
+MemState::MemState(z3::context& ctx, const Sort& sort): ctx(ctx), mem(ctx) {
+    mem = ctx.constant("mem", ctx.array_sort(ctx.bv_sort(32 - 2), ctx.bv_sort(32)));
 }
 
-z3::expr MemState::read(const z3::expr& address, unsigned size, z3::solver& solver) const {
+z3::expr MemState::read(const z3::expr& address, unsigned size) {
+    read_addrs.emplace_back(address, size);
+    return read_raw(address, size);
+}
+
+z3::expr MemState::read_raw(const z3::expr& address, unsigned size) const {
     // TODO: For now, assumed aligned accesses.
     z3::context& ctx = address.ctx();
+    z3::expr addr_hi = address.extract(31, 2);
+    z3::expr dword = mem[addr_hi];
     
     switch (size) {
         case 4:
-            solver.add(address.extract(1, 0) == address.ctx().bv_val(0, 2));
-            return mem[address.extract(31, 2)];
+            // solver.add(address.extract(1, 0) == address.ctx().bv_val(0, 2));
+            return dword;
             
         case 2:
-            solver.add(address.extract(0, 0) == address.ctx().bv_val(0, 1));
-            return z3::ite(address.extract(2, 2) == ctx.bv_val(0, 1), mem[address].extract(15, 0), mem[address].extract(31, 16));
+            // solver.add(address.extract(0, 0) == address.ctx().bv_val(0, 1));
+            return z3::ite(address.extract(2, 2) == ctx.bv_val(0, 1), dword.extract(15, 0), dword.extract(31, 16));
             
-        case 1:
-            return z3::
+        case 1: {
+            const z3::expr idx = address.extract(1, 0);
+            z3::expr res {ctx};
+            for (unsigned i = 0; i < 4; ++i) {
+                const z3::expr cmp_idx = ctx.bv_val(i, 2);
+                const z3::expr cmp = (idx == cmp_idx);
+                unsigned hi = (i + 1) * 8 - 1;
+                unsigned lo = i * 8;
+                z3::expr byte = dword.extract(hi, lo);
+                if (i == 0) {
+                    res = dword.extract(hi, lo);
+                } else {
+                    res = z3::ite(cmp, byte, res);
+                }
+            }
+            return res;
+        }
             
+        default: std::abort();
     }
-    
-    return mem(size)[address];
 }
 
 
@@ -403,12 +408,44 @@ void Register::operator()(ArchState& arch, const z3::expr& e) const {
     }
 }
 
-
 void MemState::write(const z3::expr& address, const z3::expr& value) {
-    const unsigned size = value.get_sort().bv_size() / 8;
-    z3::expr& arr = mem(size);
-    arr = z3::store(arr, address, value);
+    write_raw(address, value);
+    write_addrs.emplace_back(address, value.get_sort().bv_size() / 8);
 }
+
+void MemState::write_raw(const z3::expr& address, const z3::expr& value) {
+    const unsigned size = value.get_sort().bv_size() / 8;
+    const z3::expr addr_hi = address.extract(31, 2);
+    const z3::expr addr_lo = address.extract(1, 0);
+    z3::expr dword = mem[addr_hi];
+    z3::expr_vector parts {ctx};
+    for (int i = 4; i > 0; i -= size) {
+        const unsigned hi = i * 8 - 1;
+        const unsigned lo = (i - 1) * 8;
+        parts.push_back(dword.extract(hi, lo));
+    }
+    
+    switch (size) {
+        case 4:
+            break;
+            
+        case 2: {
+            dword = z3::ite(addr_lo.extract(1, 1) == 0, z3::concat(dword.extract(31, 16), value), z3::concat(value, dword.extract(15, 0)));
+            // solver.add(addr_lo.extract(0, 0) == ctx.bv_val(0, 1));
+            break;
+        }
+            
+        case 1: {
+            dword = z3::ite(addr_lo == 0, z3::concat(dword.extract(31, 8), value),
+                            z3::ite(addr_lo == 1, z3::concat(dword.extract(31, 16), value, dword.extract(7, 0)),
+                                    z3::ite(addr_lo == 2, z3::concat(dword.extract(31, 24), value, dword.extract(15, 0)),
+                                            z3::concat(value, dword.extract(23, 0)))));
+            break;
+        }
+            
+    }
+    mem = z3::store(mem, addr_hi, dword);
+ }
 
 
 #define ENT_(name, ...) name(ctx)

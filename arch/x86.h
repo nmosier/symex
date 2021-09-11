@@ -47,8 +47,10 @@ XB(mem2)						\
 XB(mem4)
 
 struct MemState {
+    z3::context& ctx;
     z3::expr mem;
-    
+    std::vector<std::pair<z3::expr, unsigned>> read_addrs, write_addrs;
+
     struct Sort {
         z3::func_decl cons;
         z3::sort sort;
@@ -75,12 +77,11 @@ struct MemState {
     };
     
     MemState(z3::context& ctx, const Sort& sort);
-    
-    z3::expr read(const z3::expr& address, unsigned size) const;
+
+    z3::expr read_raw(const z3::expr& address, unsigned size) const;
+    z3::expr read(const z3::expr& address, unsigned size);
     void write(const z3::expr& address, const z3::expr& value);
-    
-    z3::context& ctx() const { return mem1.ctx(); }
-};
+    void write_raw(const z3::expr& address, const z3::expr& value);};
 
 struct ArchState {
 #define ENT_(name, ...) z3::expr name
@@ -445,6 +446,18 @@ struct Context {
                     break;
                 }
                 const auto model = solver.get_model();
+                
+                // check for reads, writes
+                for (const auto& read : out_arch.mem.read_addrs) {
+                    std::cerr << "read " << model.eval(read.first) << " " << model.eval(in_arch.mem.read_raw(read.first, read.second)) << "\n";
+                }
+                out_arch.mem.read_addrs.clear();
+                
+                for (const auto& write : out_arch.mem.write_addrs) {
+                    std::cerr << "write " << model.eval(write.first) << " " << model.eval(out_arch.mem.read_raw(write.first, write.second)) << "\n";
+                }
+                out_arch.mem.write_addrs.clear();
+                
                 const auto eip = model.eval(out_arch.eip);
                 std::cerr << "eip = " << eip << "\n";
                 
