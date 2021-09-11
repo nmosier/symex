@@ -341,29 +341,28 @@ std::ostream& operator<<(std::ostream& os, const ArchState& arch) {
 }
 
 
-MemState::MemState(z3::context& ctx, const Sort& sort):
-mem1(ctx), mem2(ctx), mem4(ctx)
-{
-#define ENT(name)							\
-name = ctx.constant(#name, sort.projs[(unsigned) Sort::Fields::name].range());
-    X_x86_MEMS(ENT, ENT);
-#undef ENT
+MemState::MemState(z3::context& ctx, const Sort& sort): mem(ctx) {
+    mem = ctx.array_sort(ctx.bv_sort(32 - 2), ctx.bv_sort(32));
 }
 
-const z3::expr& MemState::mem(unsigned size) const {
+z3::expr MemState::read(const z3::expr& address, unsigned size, z3::solver& solver) const {
+    // TODO: For now, assumed aligned accesses.
+    z3::context& ctx = address.ctx();
+    
     switch (size) {
-        case 1: return mem1;
-        case 2: return mem2;
-        case 4: return mem4;
-        default: std::abort();
+        case 4:
+            solver.add(address.extract(1, 0) == address.ctx().bv_val(0, 2));
+            return mem[address.extract(31, 2)];
+            
+        case 2:
+            solver.add(address.extract(0, 0) == address.ctx().bv_val(0, 1));
+            return z3::ite(address.extract(2, 2) == ctx.bv_val(0, 1), mem[address].extract(15, 0), mem[address].extract(31, 16));
+            
+        case 1:
+            return z3::
+            
     }
-}
-
-z3::expr& MemState::mem(unsigned size) {
-    return const_cast<z3::expr&>(const_cast<const MemState&>(*this).mem(size));
-}
-
-z3::expr MemState::read(const z3::expr& address, unsigned size) const {
+    
     return mem(size)[address];
 }
 

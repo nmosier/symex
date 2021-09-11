@@ -47,11 +47,7 @@ XB(mem2)						\
 XB(mem4)
 
 struct MemState {
-#define ENT_(name) z3::expr name
-#define ENT(name) z3::expr name;
-    X_x86_MEMS(ENT, ENT_);
-#undef ENT
-#undef ENT_
+    z3::expr mem;
     
     struct Sort {
         z3::func_decl cons;
@@ -79,9 +75,6 @@ struct MemState {
     };
     
     MemState(z3::context& ctx, const Sort& sort);
-    
-    const z3::expr& mem(unsigned size) const;
-    z3::expr& mem(unsigned size);
     
     z3::expr read(const z3::expr& address, unsigned size) const;
     void write(const z3::expr& address, const z3::expr& value);
