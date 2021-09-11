@@ -15,14 +15,12 @@ link_libraries("${Z3_LIBRARIES}" ${CAPSTONE_LIBRARIES})
 link_directories(${CAPSTONE_LIBRARY_DIRS})
 include_directories("${Z3_INCLUDE_DIRS}" ${CAPSTONE_INCLUDE_DIRS} ${CMAKE_CURRENT_SOURCE_DIR})
 
+add_subdirectory(cores)
 add_subdirectory(arch)
 
 add_executable(symex
   symex.cc
   $<TARGET_OBJECTS:arch>
   )
-# target_link_libraries(symex PRIVATE "${Z3_LIBRARIES}" "${XED_DIR}/lib/libxed.a")
-# target_include_directories(symex PRIVATE "${Z3_INCLUDE_DIRS}" "${XED_DIR}/include" "${CMAKE_CURRENT_SOURCE_DIR}")
-# target_compile_options(symex PRIVATE -m32)
-# target_link_options(symex PRIVATE -m32)
-
+target_compile_options(cores PRIVATE -m32)
+target_link_options(cores PRIVATE -m32)

@@ -98,14 +98,14 @@ namespace cs {
     csh& get_handle() { return handle_; }
     const csh get_handle() const { return handle_; }
 
-    std::size_t disasm(const uint8_t *code, std::size_t code_size, uint64_t address, insns& res) {
-      return res.count = cs_disasm(handle_, code, code_size, address, 0, &res.vec);
+    std::size_t disasm(const uint8_t *code, std::size_t code_size, uint64_t address, std::size_t count, insns& res) {
+      return res.count = cs_disasm(handle_, code, code_size, address, count, &res.vec);
     }
 
     template <typename Container>
-    std::size_t disasm(const Container& container, uint64_t address, insns& res) {
+    std::size_t disasm(const Container& container, uint64_t address, std::size_t count, insns& res) {
       return disasm(container.data(), container.size() * sizeof(container.data()[0]),
-		    address, res);
+		    address, count, res);
     }
 
     void option(cs_opt_type type, std::size_t value) {
