@@ -29,4 +29,38 @@ expr concat(const expr& a, const expr& b, Args&&... args) {
     }
     return concat(evec);
 }
+
+inline expr bv_store(const expr& acc, const expr& val, unsigned lo) {
+    z3::context& ctx = acc.ctx();
+    const auto val_bits = val.get_sort().bv_size();
+    const auto acc_bits = acc.get_sort().bv_size();
+    z3::expr_vector slices {ctx};
+    if (lo + val_bits < acc_bits) {
+        slices.push_back(acc.extract(acc_bits - 1, lo + val_bits));
+    }
+    slices.push_back(val);
+    if (lo > 0) {
+        slices.push_back(acc.extract(lo - 1, 0));
+    }
+    const z3::expr res = z3::concat(slices);
+    assert(res.get_sort().bv_size() == acc.get_sort().bv_size());
+    return res;
+}
+
+inline expr bv_store(const expr& acc, unsigned val, unsigned hi, unsigned lo) {
+    return bv_store(acc, acc.ctx().bv_val(val, hi - lo + 1), lo);
+}
+    
+}
+
+
+namespace util {
+struct null_output_iterator {
+    const null_output_iterator& operator++() const { return *this; }
+    const null_output_iterator& operator++(int) const { return *this; }
+    const null_output_iterator& operator*() const { return *this; }
+    
+    template <typename T>
+    const T& operator=(const T& val) const { return val; }
+};
 }

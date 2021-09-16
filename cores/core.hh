@@ -56,6 +56,10 @@ struct Thread {
     SegmentIterator segments_begin() const { return segments_.begin(); }
     SegmentIterator segments_end() const { return segments_.end(); }
     const Segment& segment(size_t idx) const { return segments_.at(idx); }
+      
+      
+      template <typename T>
+      T read(uint64_t addr) const;
 
     template <typename... Args>
     Core(Args&&... args): file_(std::forward<Args>(args)...) {}
@@ -80,5 +84,16 @@ struct Thread {
       return (const T *) ((const char *) file().map + off);
     }
   };
+
+template <typename T>
+T Core::read(uint64_t addr) const {
+    for (auto it = segments_begin(); it != segments_end(); ++it) {
+        if (it->contains(addr, sizeof(T))) {
+            return * (const T *) ((const uint8_t *) it->base + (addr - it->vmaddr));
+        }
+    }
+    throw std::out_of_range("Core::read: invalid address");
+}
+
 
 }

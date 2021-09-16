@@ -46,11 +46,64 @@ XB(mem1)						\
 XB(mem2)						\
 XB(mem4)
 
+using addr_t = uint32_t;
+using ByteMap = std::unordered_set<addr_t>;
+
 struct MemState {
     z3::context& ctx;
     z3::expr mem;
-    std::vector<std::pair<z3::expr, unsigned>> read_addrs, write_addrs;
-
+    
+    struct Access {
+        z3::expr addr;
+        z3::expr data;
+        
+        Access eval(const z3::model& model) const {
+            return Access {model.eval(addr), model.eval(data)};
+        }
+        
+        z3::context& ctx() const { return addr.ctx(); }
+        unsigned bits() const { return data.get_sort().bv_size(); }
+        std::size_t size() const { return bits() / 8; }
+        
+        z3::expr operator==(const Access& other) const {
+            return addr == other.addr && data == other.data;
+        }
+        
+        z3::expr operator!=(const Access& other) const {
+            return !(*this == other);
+        }
+    };
+    
+    struct Read: Access {
+        Read eval(const z3::model& model) const { return Read {Access::eval(model)}; }
+        
+        uint64_t operator()(const cores::Core& core) const {
+            const uint64_t addr = this->addr.as_uint64();
+            switch (this->data.get_sort().bv_size() / 8) {
+                case 1: return core.read<uint8_t>(addr);
+                case 2: return core.read<uint16_t>(addr);
+                case 4: return core.read<uint32_t>(addr);
+                default: std::abort();
+            }
+        }
+        
+        z3::expr operator()(const cores::Core& core, const ByteMap& write_mask) const {
+            const uint64_t addr = this->addr.as_uint64();
+            const uint64_t core_data = (*this)(core);
+            z3::expr data = this->data;
+            for (unsigned i = 0; i < size(); ++i) {
+                if (write_mask.find(addr + i) == write_mask.end()) {
+                    data = z3::bv_store(data, ctx().bv_val((core_data >> (i * 8)) & 0xff, 8), i * 8);
+                }
+            }
+            return data;
+        }
+    };
+    
+    struct Write: Access {
+        Write eval(const z3::model& model) const { return Write {Access::eval(model)}; }
+    };
+    
     struct Sort {
         z3::func_decl cons;
         z3::sort sort;
@@ -78,10 +131,12 @@ struct MemState {
     
     MemState(z3::context& ctx, const Sort& sort);
 
-    z3::expr read_raw(const z3::expr& address, unsigned size) const;
-    z3::expr read(const z3::expr& address, unsigned size);
-    void write(const z3::expr& address, const z3::expr& value);
-    void write_raw(const z3::expr& address, const z3::expr& value);};
+    template <typename OutputIt>
+    z3::expr read(const z3::expr& address, unsigned size, OutputIt read_out) const;
+    
+    template <typename OutputIt>
+    void write(const z3::expr& address, const z3::expr& value, OutputIt write_out);
+};
 
 struct ArchState {
 #define ENT_(name, ...) z3::expr name
@@ -99,7 +154,7 @@ struct ArchState {
     
     void create(unsigned id);
     
-    z3::context& ctx() { return eax.ctx(); }
+    z3::context& ctx() const { return eax.ctx(); }
     
     void zero() {
 #define ENT_(name) name = ctx().bv_val(0, 32)
@@ -142,8 +197,8 @@ struct Register {
     
     Register(x86_reg reg): reg(reg) {}
     
-    z3::expr operator()(ArchState& arch) const;
-    void operator()(ArchState& arch, const z3::expr& e) const;
+    z3::expr read(const ArchState& arch) const;
+    void write(ArchState& arch, const z3::expr& e) const;
 };
 
 struct MemoryOperand {
@@ -151,10 +206,13 @@ struct MemoryOperand {
     
     MemoryOperand(const x86_op_mem& mem): mem(mem) {}
     
-    z3::expr operator()(ArchState& arch, unsigned size) const;
-    void operator()(ArchState& arch, const z3::expr& e) const;
+    template <typename OutputIt>
+    z3::expr read(const ArchState& arch, unsigned size, OutputIt read_out) const;
     
-    z3::expr address(ArchState& arch) const;
+    template <typename OutputIt>
+    void write(ArchState& arch, const z3::expr& e, OutputIt write_out) const;
+    
+    z3::expr addr(const ArchState& arch) const;
 };
 
 struct Operand {
@@ -162,8 +220,11 @@ struct Operand {
     
     Operand(const cs_x86_op& op): op(op) {}
     
-    z3::expr operator()(ArchState& arch) const;
-    void operator()(ArchState& arch, const z3::expr& e) const;
+    template <typename OutputIt>
+    z3::expr read(const ArchState& arch, OutputIt read_out) const;
+    
+    template <typename OutputIt>
+    void write(ArchState& arch, const z3::expr& e, OutputIt write_out) const;
     
     unsigned size() const { return op.size; }
     unsigned bits() const { return size() * 8; }
@@ -175,9 +236,8 @@ struct Inst {
     
     Inst(cs_insn *I): I(I), x86(&I->detail->x86) {}
     
-    void operator()(ArchState& arch) const { transfer(arch); }
-    
-    void transfer(ArchState& arch) const;
+    template <typename OutputIt1, typename OutputIt2>
+    void transfer(ArchState& arch, OutputIt1 read_out, OutputIt2 write_out) const;
     
     bool has_multiple_exits() const {
         switch (I->id) {
@@ -228,17 +288,29 @@ private:
         return bv.extract(i, i) == ctx.bv_val(1, 1);
     }
     
-    void transfer_acc_src(ArchState& arch) const;
-    void transfer_acc_src_arith(ArchState& arch, z3::context& ctx, const z3::expr& acc,
-                                const z3::expr& src, unsigned bits, z3::expr& res) const;
-    void transfer_acc_src_logic(ArchState& arch, z3::context& ctx, const z3::expr& acc,
-                                const z3::expr& src, unsigned bits, z3::expr& res) const;
-    void transfer_jcc(ArchState& arch, z3::context& ctx) const;
-    void transfer_string(ArchState& arch, z3::context& ctx) const;
+    template <typename OutputIt1, typename OutputIt2>
+    void transfer_acc_src(ArchState& arch, OutputIt1 read_out, OutputIt2 write_out) const;
+    
+    z3::expr transfer_acc_src_arith(unsigned id, ArchState& arch, z3::context& ctx, const z3::expr& acc,
+                                const z3::expr& src, unsigned bits) const;
+    z3::expr transfer_acc_src_logic(unsigned id, ArchState& arch, z3::context& ctx, const z3::expr& acc,
+                                const z3::expr& src, unsigned bits) const;
+    
+    template <typename OutputIt1, typename OutputIt2>
+    void transfer_jcc(ArchState& arch, z3::context& ctx, OutputIt1 read_out, OutputIt2 write_out) const;
+    
+    template <typename OutputIt1, typename OutputIt2>
+    void transfer_cmovcc(ArchState& arch, z3::context& ctx, OutputIt1 read_out, OutputIt2 write_out) const;
+    
+    template <typename OutputIt1, typename OutputIt2>
+    void transfer_string(ArchState& arch, z3::context& ctx, OutputIt1 read_out, OutputIt2 write_out) const;
+
+    template <typename OutputIt1, typename OutputIt2>
+    void transfer_shift(ArchState& arch, z3::context& ctx, OutputIt1 read_out, OutputIt2 write_out) const;
+
     
 };
 
-using addr_t = uint32_t;
 
 struct Program {
     cs::handle handle {CS_ARCH_X86, CS_MODE_32};
@@ -306,6 +378,37 @@ struct CFG {
     }
 };
 
+struct Condition {
+    enum Kind {
+        A, // above
+        E, // equal
+        GE, // greater than or equal
+        NE, // not equal
+    } kind;
+    
+    Condition(Kind kind): kind(kind) {}
+    
+    const char *str() const {
+        switch (kind) {
+            case A: return "A";
+            case E: return "E";
+            case GE: return "GE";
+            case NE: return "NE";
+            default: unimplemented("cc %d", kind);
+        }
+    }
+    
+    z3::expr operator()(const ArchState& arch) const {
+        switch (kind) {
+            case A: return arch.cf == 0 && arch.zf == 0;
+            case E: return arch.zf == 1;
+            case GE: return arch.sf == 1;
+            case NE: return arch.zf == 0;
+            default: unimplemented("cc %s", str());
+        }
+    }
+};
+
 struct Context {
     z3::context ctx;
     
@@ -340,6 +443,7 @@ struct Context {
         return idx >= ctx.int_val(begin) && idx < ctx.int_val(end);
     }
     
+#if 0
     void constrain_init(z3::solver& solver) {
         solver.add(path[zero] == ctx.bv_val(0, 32), "init0");
         ArchState arch_zero {ctx, arch_sort};
@@ -383,93 +487,20 @@ struct Context {
         
         solver.add(z3::exists(idx, contains(idx, 0, max) && unpack(archs[idx]).eax == 4));
     }
+#endif
     
+    void explore_paths(Program& program);
+
+    using ReadVec = std::vector<MemState::Read>;
+    using WriteVec = std::vector<MemState::Write>;
     
-    void explore_paths(Program& program) {
-        z3::solver solver {ctx};
-        ArchState in_arch {ctx, arch_sort};
-        
-        const cores::Thread& thd = core.thread(0);
-        assert(thd.flavor == x86_THREAD_STATE32);
-        
-        x86_thread_state32_t state = * (const x86_thread_state32_t *) thd.data;
-        
-        std::cerr << "eip = " << std::hex << state.__eip << "\n";
-        
-#define ENT(name) in_arch.name = ctx.bv_val(state.__##name, 32);
-        X_x86_REGS(ENT, ENT);
-#undef ENT
-#define ENT(name, bit) in_arch.name = ctx.bv_val((state.__eflags >> bit) & 1, 1);
-        X_x86_FLAGS(ENT, ENT);
-#undef ENT
-        
-        // set return address
-        in_arch.mem.write(in_arch.esp, ctx.bv_val(0x42424242, 32));
-        
-        explore_paths_rec(program, in_arch, solver, state.__eip);
-    }
+    void explore_paths_rec_dst(Program& program, const ArchState& in_arch, const ArchState& out_arch, z3::solver& solver, const ByteMap& write_mask);
     
-    void explore_paths_rec(Program& program, const ArchState& in_arch, z3::solver& solver, addr_t addr) {
-        // add instructions until branch
-        
-        solver.push();
-        {
-            solver.add(ctx.bv_val(addr, 32) == in_arch.eip);
-            
-            if (program.map.find(addr) == program.map.end()) {
-                // find address in core
-                const auto seg_it = std::find_if(core.segments_begin(), core.segments_end(), [&] (const cores::Segment& seg) {
-                    return seg.contains(addr, 1);
-                });
-                if (seg_it == core.segments_end()) {
-                    std::cerr << "jump outside of address space: " << std::hex << addr << "\n";
-                    goto done;
-                }
-                // TODO: make this safer
-                const void *data = seg_it->at(addr);
-                program.disasm((const uint8_t *) data, 16, addr, 1);
-            }
-            
-            const Inst& inst = program.map.at(addr);
-            
-            ArchState arch = in_arch;
-            inst.transfer(arch);
-            ArchState out_arch = arch;
-            out_arch.create(next_id++);
-            solver.add(out_arch == arch);
-            
-            std::cerr << "inst @ " << std::hex << addr << " : "  << inst.I->mnemonic << " " << inst.I->op_str << "\n";
-            
-            while (true) {
-                const auto res = solver.check();
-                if (res != z3::sat) {
-                    break;
-                }
-                const auto model = solver.get_model();
-                
-                // check for reads, writes
-                for (const auto& read : out_arch.mem.read_addrs) {
-                    std::cerr << "read " << model.eval(read.first) << " " << model.eval(in_arch.mem.read_raw(read.first, read.second)) << "\n";
-                }
-                out_arch.mem.read_addrs.clear();
-                
-                for (const auto& write : out_arch.mem.write_addrs) {
-                    std::cerr << "write " << model.eval(write.first) << " " << model.eval(out_arch.mem.read_raw(write.first, write.second)) << "\n";
-                }
-                out_arch.mem.write_addrs.clear();
-                
-                const auto eip = model.eval(out_arch.eip);
-                std::cerr << "eip = " << eip << "\n";
-                
-                explore_paths_rec(program, out_arch, solver, eip.as_int64());
-                
-                solver.add(out_arch.eip != eip);
-            }
-            
-        }
-    done:
-        solver.pop();
-    }
+    void explore_paths_rec_read(Program& program, const ArchState& in_arch, const ArchState& out_arch, z3::solver& solver, const ByteMap& write_mask, const ReadVec& reads, const WriteVec& writes, ReadVec::const_iterator read_it);
+    
+    void explore_paths_rec_write(Program& program, const ArchState& in_arch, const ArchState& out_arch, z3::solver& solver, const ByteMap& write_mask, const WriteVec& writes, WriteVec::const_iterator write_it);
+    
+    void explore_paths_rec(Program& program, const ArchState& in_arch, z3::solver& solver, addr_t addr, ByteMap write_mask);
     
 };
 
