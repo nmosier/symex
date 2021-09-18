@@ -50,6 +50,14 @@ inline expr bv_store(const expr& acc, const expr& val, unsigned lo) {
 inline expr bv_store(const expr& acc, unsigned val, unsigned hi, unsigned lo) {
     return bv_store(acc, acc.ctx().bv_val(val, hi - lo + 1), lo);
 }
+
+inline expr& operator+=(expr& acc, int val) {
+    return acc = acc + val;
+}
+
+inline expr& operator-=(expr& acc, int val) {
+    return acc = acc - val;
+}
     
 }
 

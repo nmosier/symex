@@ -75,7 +75,7 @@ z3::expr MemoryOperand::read(const ArchState& arch, unsigned size, OutputIt read
 template <typename OutputIt>
 void MemoryOperand::write(ArchState& arch, const z3::expr& e, OutputIt write_out) const {
     const z3::expr addr_ = addr(arch);
-    return arch.mem.write(addr_, e, write_out);
+    arch.mem.write(addr_, e, write_out);
 }
 
 template <typename OutputIt>
@@ -214,8 +214,12 @@ void Inst::transfer(ArchState& arch, OutputIt1 read_out, OutputIt2 write_out) co
             transfer_shift(arch, ctx, read_out, write_out);
             break;
             
-        default:
-            unimplemented("%s", I->mnemonic);
+        case X86_INS_MOVSB:
+            transfer_string_rep(arch, ctx, read_out, write_out);
+            eip = arch.eip;
+            break;
+            
+        default: unimplemented("%s", I->mnemonic);
     }
     
     if (!eip) {
@@ -352,17 +356,31 @@ void Inst::transfer_cmovcc(ArchState& arch, z3::context& ctx, OutputIt1 read_out
 
 template <typename OutputIt1, typename OutputIt2>
 void Inst::transfer_string(ArchState& arch, z3::context& ctx, OutputIt1 read_out, OutputIt2 write_out) const {
-    z3::expr src {ctx};
     switch (I->id) {
         case X86_INS_STOSD:
-            src = arch.eax;
+            arch.mem.write(arch.edi, arch.eax, write_out);
+            arch.edi += 4;
+            break;
+        case X86_INS_MOVSB:
+            arch.mem.write(arch.edi, arch.mem.read(arch.esi, 4, read_out), write_out);
+            arch.esi += 4;
+            arch.edi += 4;
             break;
         default:
             unimplemented("string %s", I->mnemonic);
     }
-    const unsigned bytes = src.get_sort().bv_size() / 8;
-    arch.mem.write(arch.edi, src, write_out);
-    arch.edi = arch.edi + ctx.bv_val(bytes, 32);
+}
+
+template <typename OutputIt1, typename OutputIt2>
+void Inst::transfer_string_rep(ArchState& arch, z3::context& ctx, OutputIt1 read_out, OutputIt2 write_out) const {
+    switch (x86->prefix[0]) {
+        case X86_PREFIX_REP:
+            transfer_string(arch, ctx, read_out, write_out);
+            arch.ecx -= 1;
+            arch.eip = z3::ite(arch.ecx == 0, arch.eip + I->size, arch.eip);
+            break;
+        default: unimplemented("prefix %02hhx", x86->prefix[0]);
+    }
 }
 
 template <typename OutputIt1, typename OutputIt2>
@@ -543,7 +561,6 @@ void Context::explore_paths_rec_dst(Program& program, const ArchState& in_arch, 
     while (true) {
         const z3::check_result res = solver.check();
         if (res != z3::sat) {
-            std::cerr << __FUNCTION__ << ": " << res << "\n";
             break;
         }
         const z3::model model = solver.get_model();
@@ -643,6 +660,8 @@ void Context::explore_paths_rec(Program& program, const ArchState& in_arch, z3::
     
     const Inst& inst = program.map.at(addr);
     
+    trace.push_back(inst.I);
+    
     ArchState arch = in_arch;
     ReadVec reads;
     WriteVec writes;
@@ -654,6 +673,8 @@ void Context::explore_paths_rec(Program& program, const ArchState& in_arch, z3::
     std::cerr << "inst @ " << std::hex << addr << " : "  << inst.I->mnemonic << " " << inst.I->op_str << "\n";
     
     explore_paths_rec_read(program, in_arch, out_arch, solver, write_mask, reads, writes, reads.begin());
+    
+    trace.pop_back();
 }
 
 void Context::explore_paths(Program& program) {
@@ -673,11 +694,27 @@ void Context::explore_paths(Program& program) {
 #define ENT(name, bit) in_arch.name = ctx.bv_val((state.__eflags >> bit) & 1, 1);
     X_x86_FLAGS(ENT, ENT);
 #undef ENT
+        
+    ByteMap write_mask;
+    for (const auto& range : symbolic_ranges) {
+        for (uint64_t addr = range.base; addr < range.base + range.len; ++addr) {
+            write_mask.insert(addr);
+        }
+    }
     
     // set return address
     in_arch.mem.write(in_arch.esp, ctx.bv_val(0x42424242, 32), util::null_output_iterator());
+    for (uint64_t i = 0; i < 4; ++i) {
+        write_mask.insert(in_arch.esp.as_uint64() + i);
+    }
     
-    explore_paths_rec(program, in_arch, solver, state.__eip, {});
+    auto e = in_arch.mem.read(in_arch.esp, 4, util::null_output_iterator());
+    solver.push();
+    solver.add(e != 0x42424242);
+    assert(solver.check() == z3::unsat);
+    solver.pop();
+    
+    explore_paths_rec(program, in_arch, solver, state.__eip, write_mask);
 }
 
 }

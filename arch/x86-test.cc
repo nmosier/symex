@@ -11,36 +11,77 @@
 
 csh g_handle;
 
+const char *prog;
+
+#define error(...) \
+do { \
+fprintf(stderr, "%s: error: ", prog); \
+fprintf(stderr, __VA_ARGS__); \
+fprintf(stderr, "\n"); \
+std::exit(1); \
+} while (false)
+
+void usage(FILE *f = stderr) {
+    const char *s = R"=(usage: %s [option...] <core>
+Options:
+ -h               show help
+ -s <addr>,<len>  make memory range symbolic
+)=";
+}
+
+uint64_t parse_uint64(const char *s) {
+    char *end;
+    const uint64_t res = std::strtoull(s, &end, 0);
+    if (*s == '\0' || *end != '\0') {
+        error("bad uint64 %s", s);
+    }
+    return res;
+}
+
 int main(int argc, char *argv[]) {
-    if (argc != 2) {
-        std::cerr << "usage: " << argv[0] << " <core>\n";
-        return 1;
+    prog = argv[0];
+    
+    std::vector<x86::MemoryRange> symbolic_ranges;
+    
+    int optc;
+    while ((optc = getopt(argc, argv, "hs:")) >= 0) {
+        switch (optc) {
+            case 'h':
+                usage(stdout);
+                return EXIT_SUCCESS;
+            case 's': {
+                const char *base_s = strsep(&optarg, ",");
+                const char *len_s = optarg;
+                char *end;
+                x86::MemoryRange range;
+                range.base = parse_uint64(base_s);
+                range.len = parse_uint64(len_s);
+                symbolic_ranges.push_back(range);
+                break;
+            }
+            default:
+                usage();
+                return EXIT_FAILURE;
+        }
     }
     
-    const char *core = argv[1];
+    if (argc - optind != 1) {
+        usage();
+        return EXIT_FAILURE;
+    }
     
-  x86::Program program;
-  g_handle = program.handle.get_handle();
-
-#if 0
-  // read code from stdin
-  std::vector<uint8_t> code;
-  char c;
-  while (std::cin.get(c)) {
-    code.push_back(c);
-  }
-  
-  const auto num_insts = program.disasm(code, 0);
-  std::cout << "disassembled " << num_insts << " instructions\n";
-  assert(program.map.size() == num_insts);
-#endif
-
+    const char *core = argv[optind++];
+    
+    x86::Program program;
+    g_handle = program.handle.get_handle();
+    
     x86::Context ctx {core};
+    ctx.symbolic_ranges = symbolic_ranges;
     
     assert(ctx.core.thread(0).flavor == x86_THREAD_STATE32);
-
+    
     std::cerr << ctx.core.nsegments() << " segments\n";
     
     ctx.explore_paths(program);
-  
+    
 }

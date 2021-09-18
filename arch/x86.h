@@ -304,11 +304,12 @@ private:
     
     template <typename OutputIt1, typename OutputIt2>
     void transfer_string(ArchState& arch, z3::context& ctx, OutputIt1 read_out, OutputIt2 write_out) const;
+    
+    template <typename OutputIt1, typename OutputIt2>
+    void transfer_string_rep(ArchState& arch, z3::context& ctx, OutputIt1 read_out, OutputIt2 write_out) const;
 
     template <typename OutputIt1, typename OutputIt2>
     void transfer_shift(ArchState& arch, z3::context& ctx, OutputIt1 read_out, OutputIt2 write_out) const;
-
-    
 };
 
 
@@ -409,6 +410,11 @@ struct Condition {
     }
 };
 
+struct MemoryRange {
+    uint64_t base;
+    uint64_t len;
+};
+
 struct Context {
     z3::context ctx;
     
@@ -416,6 +422,9 @@ struct Context {
     
     ArchState::Sort arch_sort;
     MemState::Sort mem_sort;
+    
+    std::vector<MemoryRange> symbolic_ranges;
+    std::vector<const cs_insn *> trace;
     
     z3::expr archs;
     z3::expr path;
@@ -502,6 +511,8 @@ struct Context {
     
     void explore_paths_rec(Program& program, const ArchState& in_arch, z3::solver& solver, addr_t addr, ByteMap write_mask);
     
+//    void strncpy(const ArchState& in_arch, ArchState ) const;
+    // 
 };
 
 }
