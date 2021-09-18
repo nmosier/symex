@@ -515,4 +515,7 @@ struct Context {
     // 
 };
 
+std::ostream& dump_trace(std::ostream& os, const std::vector<const cs_insn *>& trace);
+void dump_trace(const std::string& path, const std::vector<const cs_insn *>& trace);
+
 }

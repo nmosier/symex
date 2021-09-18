@@ -1,4 +1,5 @@
 #include <vector>
+#include <fstream>
 
 #include "capstone++.h"
 
@@ -651,6 +652,7 @@ void Context::explore_paths_rec(Program& program, const ArchState& in_arch, z3::
         });
         if (seg_it == core.segments_end()) {
             std::cerr << "jump outside of address space: " << std::hex << addr << "\n";
+            dump_trace("trace.asm", trace);
             return;
         }
         // TODO: make this safer
@@ -715,6 +717,18 @@ void Context::explore_paths(Program& program) {
     solver.pop();
     
     explore_paths_rec(program, in_arch, solver, state.__eip, write_mask);
+}
+
+std::ostream& dump_trace(std::ostream& os, const std::vector<const cs_insn *>& trace) {
+    for (const cs_insn *I : trace) {
+        os << std::hex << I->address << ": " << I->mnemonic << " " << I->op_str << "\n";
+    }
+    return os;
+}
+
+void dump_trace(const std::string& path, const std::vector<const cs_insn *>& trace) {
+    std::ofstream ofs {path};
+    dump_trace(ofs, trace);
 }
 
 }
