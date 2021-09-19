@@ -146,11 +146,18 @@ void Inst::transfer(ArchState& arch, OutputIt1 read_out, OutputIt2 write_out) co
         case X86_INS_OR:
         case X86_INS_XOR:
         case X86_INS_AND:
-        case X86_INS_MOV:
         case X86_INS_TEST:
         case X86_INS_CMP:
             transfer_acc_src(arch, read_out, write_out);
             break;
+            
+        case X86_INS_MOV: {
+            const Operand dst {x86->operands[0]};
+            const Operand src {x86->operands[1]};
+            dst.write(arch, src.read(arch, read_out), write_out);
+            break;
+        }
+            
             
         case X86_INS_RET:
             eip = arch.mem.read(arch.esp, 4, read_out);
@@ -218,6 +225,10 @@ void Inst::transfer(ArchState& arch, OutputIt1 read_out, OutputIt2 write_out) co
         case X86_INS_MOVSB:
             transfer_string_rep(arch, ctx, read_out, write_out);
             eip = arch.eip;
+            break;
+            
+        case X86_INS_IMUL:
+            transfer_imul(arch, ctx, read_out, write_out);
             break;
             
         default: unimplemented("%s", I->mnemonic);
@@ -304,10 +315,6 @@ void Inst::transfer_acc_src(ArchState& arch, OutputIt1 read_out, OutputIt2 write
             acc = transfer_acc_src_logic(I->id, arch, ctx, acc, src, acc_op.bits());
             break;
             
-        case X86_INS_MOV:
-            acc = src;
-            break;
-            
         case X86_INS_TEST:
             transfer_acc_src_logic(X86_INS_AND, arch, ctx, acc, src, acc_op.bits());
             break;
@@ -321,6 +328,34 @@ void Inst::transfer_acc_src(ArchState& arch, OutputIt1 read_out, OutputIt2 write
     }
     
     acc_op.write(arch, acc, write_out);
+}
+
+template <typename OutputIt1, typename OutputIt2>
+void Inst::transfer_imul(ArchState& arch, z3::context& ctx, OutputIt1 read_out, OutputIt2 write_out) const {
+    switch (x86->op_count) {
+        case 1:
+        case 2:
+            unimplemented("imul %s", I->op_str);
+        case 3: {
+            const Operand dst_op {x86->operands[0]};
+            const Operand src_op {x86->operands[1]};
+            const Operand imm_op {x86->operands[2]};
+            z3::expr src = src_op.read(arch, read_out);
+            z3::expr imm = imm_op.read(arch, read_out);
+            const unsigned imm_sz = imm.get_sort().bv_size();
+            const unsigned src_sz = src.get_sort().bv_size();
+            const unsigned res_sz = src_sz * 2;
+            imm = z3::sext(imm, res_sz - imm_sz);
+            src = z3::sext(src, res_sz - src_sz);
+            z3::expr res = src * imm;
+            dst_op.write(arch, res.extract(src_sz - 1, 0), write_out);
+            arch.cf = res.extract(res_sz - 1, res_sz - 1) ^ res.extract(src_sz - 1, src_sz - 1);
+            break;
+        }
+            
+            
+        default: std::abort();
+    }
 }
 
 template <typename OutputIt1, typename OutputIt2>
@@ -475,7 +510,10 @@ z3::expr Register::read(const ArchState& arch) const {
         case X86_REG_EBP: return arch.ebp;
         case X86_REG_ESP: return arch.esp;
             
+        case X86_REG_AX: return arch.eax.extract(15, 0);
+            
         case X86_REG_CL: return arch.ecx.extract(7, 0);
+            
             
         default:
             unimplemented("reg %s", cs_reg_name(g_handle, reg));
@@ -704,6 +742,7 @@ void Context::explore_paths(Program& program) {
         }
     }
     
+#if 0
     // set return address
     in_arch.mem.write(in_arch.esp, ctx.bv_val(0x42424242, 32), util::null_output_iterator());
     for (uint64_t i = 0; i < 4; ++i) {
@@ -715,6 +754,7 @@ void Context::explore_paths(Program& program) {
     solver.add(e != 0x42424242);
     assert(solver.check() == z3::unsat);
     solver.pop();
+#endif
     
     explore_paths_rec(program, in_arch, solver, state.__eip, write_mask);
 }

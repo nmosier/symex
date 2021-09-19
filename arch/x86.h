@@ -307,9 +307,12 @@ private:
     
     template <typename OutputIt1, typename OutputIt2>
     void transfer_string_rep(ArchState& arch, z3::context& ctx, OutputIt1 read_out, OutputIt2 write_out) const;
-
+    
     template <typename OutputIt1, typename OutputIt2>
     void transfer_shift(ArchState& arch, z3::context& ctx, OutputIt1 read_out, OutputIt2 write_out) const;
+    
+    template <typename OutputIt1, typename OutputIt2>
+    void transfer_imul(ArchState& arch, z3::context& ctx, OutputIt1 read_out, OutputIt2 write_out) const;
 };
 
 
