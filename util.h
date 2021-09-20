@@ -58,7 +58,35 @@ inline expr& operator+=(expr& acc, int val) {
 inline expr& operator-=(expr& acc, int val) {
     return acc = acc - val;
 }
-    
+
+inline expr operator==(const z3::expr_vector& a, const z3::expr_vector& b) {
+    assert(a.size() == b.size());
+    z3::context& ctx = a.ctx();
+    z3::expr acc = ctx.bool_val(true);
+    for (std::size_t i = 0; i < a.size(); ++i) {
+        acc = acc && a[i] == b[i];
+    }
+    return acc;
+}
+
+inline expr bvsign(const z3::expr& e) {
+    const unsigned i = e.get_sort().bv_size() - 1;
+    return e.extract(i, i);
+}
+
+
+inline expr bvne(const z3::expr& a, const z3::expr& b) {
+    return a ^ b;
+}
+
+inline expr bveq(const z3::expr& a, const z3::expr& b) {
+    return ~bvne(a, b);
+}
+
+inline expr bool_to_bv(const z3::expr& e) {
+    return z3::ite(e, e.ctx().bv_val(1, 1), e.ctx().bv_val(0, 1));
+}
+
 }
 
 
@@ -71,4 +99,15 @@ struct null_output_iterator {
     template <typename T>
     const T& operator=(const T& val) const { return val; }
 };
+}
+
+inline z3::expr operator==(const std::vector<z3::expr>& a, const std::vector<z3::expr>& b) {
+    assert(a.size() == b.size());
+    assert(a.size() > 0);
+    z3::context& ctx = a.front().ctx();
+    z3::expr acc = ctx.bool_val(true);
+    for (std::size_t i = 0; i < a.size(); ++i) {
+        acc = acc && a[i] == b[i];
+    }
+    return acc;
 }

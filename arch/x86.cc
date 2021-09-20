@@ -53,15 +53,7 @@ z3::expr MemoryOperand::addr(const ArchState& arch) const {
     mem.base == X86_REG_INVALID ? ctx.bv_val(0, 32) : Register(mem.base).read(arch);
     z3::expr index =
     mem.index == X86_REG_INVALID ? ctx.bv_val(0, 32) : Register(mem.index).read(arch);
-    switch (mem.scale) {
-        case 2:
-        case 1:
-        case 0:
-            break;
-        default:
-            std::abort();
-    }
-    z3::expr index_scaled = z3::shl(index, mem.scale);
+    z3::expr index_scaled = z3::shl(index, (unsigned) log2(mem.scale));
     z3::expr disp = ctx.bv_val(mem.disp, 32);
     z3::expr addr = base + index_scaled + disp;
     return addr;
@@ -69,6 +61,11 @@ z3::expr MemoryOperand::addr(const ArchState& arch) const {
 
 template <typename OutputIt>
 z3::expr MemoryOperand::read(const ArchState& arch, unsigned size, OutputIt read_out) const {
+    if (mem.segment != X86_REG_INVALID) {
+        std::cerr << "warning: segment address; returning 0\n";
+        return arch.ctx().bv_val(0, size * 8);
+    }
+    
     const z3::expr addr_ = addr(arch);
     return arch.mem.read(addr_, size, read_out);
 }
@@ -119,6 +116,51 @@ void Operand::write(ArchState& arch, const z3::expr& e, OutputIt write_out) cons
 
 template <typename OutputIt1, typename OutputIt2>
 void Inst::transfer(ArchState& arch, OutputIt1 read_out, OutputIt2 write_out) const {
+    switch (I->id) {
+        case X86_INS_PUSH:
+        case X86_INS_MOV:
+        case X86_INS_ADD:
+        case X86_INS_SUB:
+        case X86_INS_CALL:
+        case X86_INS_POP:
+        case X86_INS_TEST:
+        case X86_INS_AND:
+        case X86_INS_OR:
+        case X86_INS_XOR:
+        case X86_INS_PXOR:
+        case X86_INS_JE:
+        case X86_INS_CMP:
+        case X86_INS_LEA:
+        case X86_INS_RET:
+        case X86_INS_JGE:
+        case X86_INS_JMP:
+        case X86_INS_PCMPEQB:
+        case X86_INS_SHL:
+            case X86_INS_PMOVMSKB:
+        case X86_INS_BSF:
+        case X86_INS_NOP:
+        case X86_INS_CMOVS:
+        case X86_INS_CMOVB:
+        case X86_INS_JB:
+        case X86_INS_JA:
+        case X86_INS_SHR:
+        case X86_INS_SETNE:
+        case X86_INS_MOVZX:
+        case X86_INS_JNE:
+        case X86_INS_JG:
+        case X86_INS_INC:
+        case X86_INS_MOVSX:
+        case X86_INS_JNS:
+        case X86_INS_JLE:
+        case X86_INS_JS:
+        case X86_INS_DEC:
+        case X86_INS_JL:
+            break;
+            
+        default: unimplemented("of %s", I->mnemonic);
+    }
+    
+    
     z3::context& ctx = arch.ctx();
     std::optional<z3::expr> eip;
     const auto nops = x86->op_count;
@@ -148,6 +190,8 @@ void Inst::transfer(ArchState& arch, OutputIt1 read_out, OutputIt2 write_out) co
         case X86_INS_AND:
         case X86_INS_TEST:
         case X86_INS_CMP:
+        case X86_INS_PXOR:
+        case X86_INS_PCMPEQB:
             transfer_acc_src(arch, read_out, write_out);
             break;
             
@@ -157,6 +201,81 @@ void Inst::transfer(ArchState& arch, OutputIt1 read_out, OutputIt2 write_out) co
             dst.write(arch, src.read(arch, read_out), write_out);
             break;
         }
+            
+        case X86_INS_MOVSX:
+        case X86_INS_MOVZX: {
+            const Operand dst {x86->operands[0]};
+            const Operand src {x86->operands[1]};
+            z3::expr (*f)(const z3::expr&, unsigned);
+            switch (I->id) {
+                case X86_INS_MOVSX: f = &z3::sext; break;
+                case X86_INS_MOVZX: f = &z3::zext; break;
+                default: unimplemented("%s", I->mnemonic);
+            }
+            dst.write(arch, f(src.read(arch, read_out), dst.bits() - src.bits()), write_out);
+            break;
+        }
+            
+        case X86_INS_CMOVS:
+        case X86_INS_CMOVB: {
+            using K = Condition::Kind;
+            static const std::unordered_map<unsigned, Condition::Kind> cond_map = {
+                {X86_INS_CMOVS, K::S},
+                {X86_INS_CMOVB, K::B},
+            };
+            const Condition cond {cond_map.at(I->id)};
+            const Operand dst_op {x86->operands[0]};
+            const Operand src_op {x86->operands[1]};
+            const z3::expr src = src_op.read(arch, read_out);
+            const z3::expr dst = dst_op.read(arch, read_out);
+            const z3::expr res = z3::ite(cond(arch), src, dst);
+            dst_op.write(arch, res, write_out);
+            break;
+        }
+            
+        case X86_INS_PMOVMSKB: {
+            const Operand dst_op {x86->operands[0]};
+            const Operand src_op {x86->operands[1]};
+            const unsigned src_bytes = src_op.bits() / 8;
+            const z3::expr src = src_op.read(arch, read_out);
+            z3::expr_vector res {ctx};
+            res.push_back(ctx.bv_val(0, dst_op.bits() - src_bytes));
+            for (unsigned i = 0; i < src_bytes; ++i) {
+                const unsigned byte = src_bytes - i - 1;
+                const unsigned hi = (byte + 1) * 8 - 1;
+                res.push_back(src.extract(hi, hi));
+            }
+            dst_op.write(arch, z3::concat(res), write_out);
+            break;
+        }
+            
+        case X86_INS_BSF: {
+            const Operand dst_op {x86->operands[0]};
+            const Operand src_op {x86->operands[1]};
+            const z3::expr src = src_op.read(arch, read_out);
+            struct Entry {
+                z3::expr one;
+                z3::expr val;
+                Entry(const z3::expr& one, const z3::expr& val): one(one), val(val) {}
+            };
+            std::vector<Entry> cur;
+            for (unsigned i = 0; i < src.get_sort().bv_size(); ++i) {
+                cur.emplace_back(src.extract(i, i) == ctx.bv_val(1, 1), ctx.bv_val(i, dst_op.bits()));
+            }
+            while (cur.size() > 1) {
+                std::vector<Entry> next;
+                for (unsigned i = 0; i < cur.size(); i += 2) {
+                    const auto& left = cur[i];
+                    const auto& right = cur[i + 1];
+                    next.emplace_back(left.one || right.one, z3::ite(right.one, right.val, left.val));
+                }
+                cur = std::move(next);
+            }
+            dst_op.write(arch, cur.front().val, write_out);
+            arch.zf = ~z3::bvredor(src);
+            break;
+        }
+            
             
             
         case X86_INS_RET:
@@ -188,20 +307,36 @@ void Inst::transfer(ArchState& arch, OutputIt1 read_out, OutputIt2 write_out) co
             
         case X86_INS_JMP: {
             const Operand op {I->detail->x86.operands[0]};
-#if 0
-            eip = arch.eip + I->size + op.read(arch, read_out);
-#else
             eip = op.read(arch, read_out);
-#endif
             break;
         }
             
         case X86_INS_JE:
+        case X86_INS_JB:
+        case X86_INS_JA:
         case X86_INS_JGE:
         case X86_INS_JNE:
+        case X86_INS_JG:
+        case X86_INS_JNS:
+        case X86_INS_JLE:
+        case X86_INS_JS:
+        case X86_INS_JL:
             transfer_jcc(arch, ctx, read_out, write_out);
             eip = arch.eip;
             break;
+            
+        case X86_INS_SETNE: {
+            const Operand acc_op {x86->operands[0]};
+            using K = Condition::Kind;
+            static const std::unordered_map<unsigned, K> map = {
+                {X86_INS_SETNE, K::NE},
+            };
+            const Condition cond {map.at(I->id)};
+            const z3::expr cc = cond(arch);
+            // TODO: optimize by using sext instead?
+            acc_op.write(arch, z3::ite(cc, ctx.bv_val(-1, 8), ctx.bv_val(0, 8)), write_out);
+            break;
+        }
             
         case X86_INS_STOSD:
             transfer_string(arch, ctx, read_out, write_out);
@@ -219,6 +354,7 @@ void Inst::transfer(ArchState& arch, OutputIt1 read_out, OutputIt2 write_out) co
             break;
             
         case X86_INS_SHR:
+        case X86_INS_SHL:
             transfer_shift(arch, ctx, read_out, write_out);
             break;
             
@@ -230,6 +366,33 @@ void Inst::transfer(ArchState& arch, OutputIt1 read_out, OutputIt2 write_out) co
         case X86_INS_IMUL:
             transfer_imul(arch, ctx, read_out, write_out);
             break;
+            
+        case X86_INS_DEC:
+        case X86_INS_INC: {
+            const Operand acc_op {x86->operands[0]};
+            z3::expr acc = acc_op.read(arch, read_out);
+            z3::expr res {ctx};
+            const z3::expr overflow = z3::concat(ctx.bv_val(1, 1), ctx.bv_val(0, acc_op.bits() - 1));
+            switch (I->id) {
+                case X86_INS_DEC:
+                    res = acc - 1;
+                    arch.of = z3::bool_to_bv(acc == overflow);
+                    break;
+                    
+                case X86_INS_INC:
+                    res = acc + 1;
+                    arch.of = z3::bool_to_bv(acc == ~overflow);
+                    break;
+                    
+                default: unimplemented("%s", I->mnemonic);
+            }
+            
+            acc_op.write(arch, res, write_out);
+            const unsigned hi = acc_op.bits() - 1;
+            arch.zf = ~z3::bvredor(acc);
+            arch.sf = acc.extract(hi, hi);
+            break;
+        }
             
         default: unimplemented("%s", I->mnemonic);
     }
@@ -243,29 +406,28 @@ void Inst::transfer(ArchState& arch, OutputIt1 read_out, OutputIt2 write_out) co
 z3::expr Inst::transfer_acc_src_arith(unsigned id, ArchState& arch, z3::context& ctx, const z3::expr& acc,
                                   const z3::expr& src, unsigned bits) const {
     z3::expr res {ctx};
-    const z3::expr z = ctx.bv_val(0, 1);
-    const z3::expr acc_z = concat(z, acc);
-    const z3::expr src_z = concat(z, src);
     z3::expr res_x {ctx};
     
     switch (id) {
-        case X86_INS_ADD:
-            res_x = acc_z + src_z;
+        case X86_INS_ADD: {
+            res_x = z3::zext(acc, 1) + z3::zext(src, 1);
+            res = res_x.extract(bits - 1, 0);
+            arch.of = z3::bool_to_bv(z3::bvsign(acc) == z3::bvsign(src) && z3::bvsign(res) != z3::bvsign(acc));
             break;
+        }
             
         case X86_INS_SUB:
-            res_x = acc_z - src_z;
+            res_x = z3::zext(acc, 1) - z3::zext(src, 1);
+            res = res_x.extract(bits - 1, 0);
+            arch.of = z3::bool_to_bv(z3::bvsign(acc) != z3::bvsign(src) && z3::bvsign(res) != z3::bvsign(acc));
             break;
             
         default: unimplemented("%s", I->mnemonic);
     }
     
-    res = res_x.extract(bits - 1, 0);
-    
-    // update flags
     arch.cf = res_x.extract(bits, bits);
     arch.zf = ~z3::bvredor(res);
-    arch.sf = res.extract(bits - 1, bits - 1);
+    arch.sf = z3::bvsign(res);
     
     return res;
 }
@@ -282,15 +444,26 @@ z3::expr Inst::transfer_acc_src_logic(unsigned id, ArchState& arch, z3::context&
             res = acc | src;
             break;
         case X86_INS_XOR:
+        case X86_INS_PXOR:
             res = acc ^ src;
             break;
         default: unimplemented("%s", I->mnemonic);
     }
     
     // update flags
-    arch.cf = ctx.bv_val(0, 1);
-    arch.zf = ~z3::bvredor(res);
-    arch.sf = res.extract(bits - 1, bits - 1);
+    switch (id) {
+        case X86_INS_AND:
+        case X86_INS_OR:
+        case X86_INS_XOR:
+            arch.cf = ctx.bv_val(0, 1);
+            arch.zf = ~z3::bvredor(res);
+            arch.sf = res.extract(bits - 1, bits - 1);
+            arch.of = ctx.bv_val(0, 1);
+            break;
+        case X86_INS_PXOR:
+            break;
+        default: unimplemented("%s", I->mnemonic);
+    }
     
     return res;
 }
@@ -312,6 +485,7 @@ void Inst::transfer_acc_src(ArchState& arch, OutputIt1 read_out, OutputIt2 write
         case X86_INS_OR:
         case X86_INS_AND:
         case X86_INS_XOR:
+        case X86_INS_PXOR:
             acc = transfer_acc_src_logic(I->id, arch, ctx, acc, src, acc_op.bits());
             break;
             
@@ -323,11 +497,39 @@ void Inst::transfer_acc_src(ArchState& arch, OutputIt1 read_out, OutputIt2 write
             transfer_acc_src_arith(X86_INS_SUB, arch, ctx, acc, src, acc_op.bits());
             break;
             
+        case X86_INS_PCMPEQB: {
+            z3::expr_vector res {ctx};
+            for (unsigned i = 0; i < acc.get_sort().bv_size(); i += 8) {
+                const unsigned hi = 32 - i - 1;
+                const unsigned lo = 32 - i - 8;
+                res.push_back(acc.extract(hi, lo) == src.extract(hi, lo) ? ctx.bv_val(-1, 8) : ctx.bv_val(0, 8));
+            }
+            acc = z3::concat(res);
+            break;
+        }
+            
+            
         default:
             unimplemented("%s", I->mnemonic);
     }
     
-    acc_op.write(arch, acc, write_out);
+    switch (I->id) {
+        case X86_INS_ADD:
+        case X86_INS_SUB:
+        case X86_INS_OR:
+        case X86_INS_AND:
+        case X86_INS_XOR:
+        case X86_INS_PXOR:
+        case X86_INS_PCMPEQB:
+            acc_op.write(arch, acc, write_out);
+            break;
+            
+        case X86_INS_TEST:
+        case X86_INS_CMP:
+            break;
+            
+        default: unimplemented("%s", I->mnemonic);
+    }
 }
 
 template <typename OutputIt1, typename OutputIt2>
@@ -371,6 +573,12 @@ void Inst::transfer_jcc(ArchState& arch, z3::context& ctx, OutputIt1 read_out, O
         {X86_INS_JGE, K::GE},
         {X86_INS_JNE, K::NE},
         {X86_INS_JA,  K::A},
+        {X86_INS_JB,  K::B},
+        {X86_INS_JG,  K::G},
+        {X86_INS_JNS, K::NS},
+        {X86_INS_JLE, K::LE},
+        {X86_INS_JS,  K::S},
+        {X86_INS_JL,  K::L},
     };
     const Condition cond {cond_map.at(I->id)};
     
@@ -429,17 +637,24 @@ void Inst::transfer_shift(ArchState& arch, z3::context& ctx, OutputIt1 read_out,
     assert(acc.get_sort().bv_size() >= shift.get_sort().bv_size());
     shift = z3::zext(shift, acc.get_sort().bv_size() - shift.get_sort().bv_size());
     z3::expr res {ctx};
-    z3::expr cf {ctx};
-    struct Shift {
-        z3::expr (*f)(const z3::expr&, const z3::expr&);
-        unsigned bit;
-    };
-    static const std::unordered_map<unsigned, Shift> map = {
-        {X86_INS_SHR, {&z3::lshr, 0}},
-    };
-    const Shift& info = map.at(I->id);
-    arch.cf = info.f(acc, shift - 1).extract(info.bit, info.bit);
-    acc_op.write(arch, info.f(acc, shift), write_out);
+    switch (I->id) {
+        case X86_INS_SHL:
+            res = z3::shl(acc, shift);
+            arch.cf = z3::bvsign(z3::shl(acc, shift - 1));
+            arch.of = acc.extract(acc_op.bits() - 1, acc_op.bits() - 1) ^ acc.extract(acc_op.bits() - 2, acc_op.bits() - 2);
+            break;
+            
+        case X86_INS_SHR:
+            res = z3::lshr(acc, shift);
+            arch.cf = z3::lshr(acc, shift - 1).extract(0, 0);
+            arch.of = z3::bvsign(acc);
+            break;
+    }
+    
+    arch.sf = z3::bvsign(res);
+    arch.zf = ~z3::bvredor(res);
+    
+    acc_op.write(arch, res, write_out);
 }
 
 
@@ -463,7 +678,7 @@ z3::expr MemState::read(const z3::expr& address, unsigned size, OutputIt read_ou
     z3::expr addr_hi = address.extract(31, 2);
     z3::expr dword = mem[addr_hi];
     
-    *read_out++ = Read {address, dword};
+    *read_out++ = Read {z3::concat(addr_hi, ctx.bv_val(0, 2)), dword};
     
     switch (size) {
         case 4:
@@ -492,7 +707,18 @@ z3::expr MemState::read(const z3::expr& address, unsigned size, OutputIt read_ou
             return res;
         }
             
-        default: std::abort();
+        case 16: {
+            z3::expr_vector res {ctx};
+            // TODO: assert that this can't happen.
+            addr_hi = address.extract(31, 4);
+            for (unsigned i = 0; i < 4; ++i) {
+                res.push_back(mem[z3::concat(addr_hi, ctx.bv_val(i, 2))]);
+            }
+            return z3::concat(res);
+        }
+            
+            
+        default: unimplemented("size %u", size);
     }
 }
 
@@ -512,8 +738,18 @@ z3::expr Register::read(const ArchState& arch) const {
             
         case X86_REG_AX: return arch.eax.extract(15, 0);
             
+        case X86_REG_AL: return arch.eax.extract(7, 0);
+        case X86_REG_BL: return arch.ebx.extract(7, 0);
         case X86_REG_CL: return arch.ecx.extract(7, 0);
             
+        case X86_REG_XMM0: return arch.xmms[0];
+        case X86_REG_XMM1: return arch.xmms[1];
+        case X86_REG_XMM2: return arch.xmms[2];
+        case X86_REG_XMM3: return arch.xmms[3];
+        case X86_REG_XMM4: return arch.xmms[4];
+        case X86_REG_XMM5: return arch.xmms[5];
+        case X86_REG_XMM6: return arch.xmms[6];
+        case X86_REG_XMM7: return arch.xmms[7];
             
         default:
             unimplemented("reg %s", cs_reg_name(g_handle, reg));
@@ -532,6 +768,18 @@ void Register::write(ArchState& arch, const z3::expr& e) const {
             
         case X86_REG_EBP: arch.ebp = e; break;
         case X86_REG_ESP: arch.esp = e; break;
+            
+        case X86_REG_XMM0: arch.xmms[0] = e; break;
+        case X86_REG_XMM1: arch.xmms[1] = e; break;
+        case X86_REG_XMM2: arch.xmms[2] = e; break;
+        case X86_REG_XMM3: arch.xmms[3] = e; break;
+        case X86_REG_XMM4: arch.xmms[4] = e; break;
+        case X86_REG_XMM5: arch.xmms[5] = e; break;
+        case X86_REG_XMM6: arch.xmms[6] = e; break;
+        case X86_REG_XMM7: arch.xmms[7] = e; break;
+            
+        case X86_REG_AL: arch.eax = z3::bv_store(arch.eax, e, 0); break;
+        case X86_REG_BL: arch.ebx = z3::bv_store(arch.ebx, e, 0); break;
             
         default:
             unimplemented("reg %s", cs_reg_name(g_handle, reg));
@@ -574,6 +822,9 @@ void MemState::write(const z3::expr& address, const z3::expr& value, OutputIt wr
 #define ENT(name, ...) ENT_(name),
 ArchState::ArchState(z3::context& ctx, const Sort& sort):
 X_x86_REGS(ENT, ENT_), X_x86_FLAGS(ENT, ENT_), mem(ctx, sort.mem) {
+    for (std::size_t i = 0; i < nxmms; ++i) {
+        xmms.emplace_back(ctx);
+    }
     zero();
 }
 #undef ENT_
@@ -586,25 +837,67 @@ void ArchState::create(unsigned id) {
 #define ENT(name, ...) name = name.ctx().bv_const((std::string(#name) + std::to_string(id)).c_str(), 1);
     X_x86_FLAGS(ENT, ENT);
 #undef ENT
+    for (std::size_t i = 0; i < nxmms; ++i) {
+        std::stringstream name;
+        name << "xmm" << i << "_" << id << "\n";
+        xmms[i] = ctx().bv_const(name.str().c_str(), xmm_bits);
+    }
 }
 
 z3::expr ArchState::operator==(const ArchState& other) const {
+    const z3::expr xmm_cmp = xmms == other.xmms;
 #define ENT_(name, ...) name == other.name
 #define ENT(name, ...) ENT_(name) &&
-    return X_x86_REGS(ENT, ENT_) && X_x86_FLAGS(ENT, ENT_);
+    return X_x86_REGS(ENT, ENT_) && X_x86_FLAGS(ENT, ENT_) && xmm_cmp;
 #undef ENT
 #undef ENT_
 }
 
 void Context::explore_paths_rec_dst(Program& program, const ArchState& in_arch, const ArchState& out_arch, z3::solver& solver, const ByteMap& write_mask) {
+    unsigned count = 0;
     while (true) {
         const z3::check_result res = solver.check();
         if (res != z3::sat) {
+            const auto core = solver.unsat_core();
+            for (const auto& e : core) {
+                std::cerr << e << "\n";
+            }
             break;
+        }
+        if (count > 0) {
+            std::cerr << "error: nondeterministic\n";
+            std::abort();
         }
         const z3::model model = solver.get_model();
         const z3::expr eip = model.eval(out_arch.eip);
         std::cerr << "dst " << eip << "\n";
+        
+#if 0
+        // DEBUG
+        std::cerr << I->mnemonic << " " << I->op_str << ": ";
+        for (unsigned i = 0; i < I->detail->x86.op_count; ++i) {
+            const Operand op {I->detail->x86.operands[i]};
+            const auto before = op.read(in_arch, util::null_output_iterator()).simplify();
+            const auto after = op.read(out_arch, util::null_output_iterator()).simplify();
+            std::cerr << model.eval(before) << "/" << model.eval(after) << "\n";
+            
+            if (I->id == X86_INS_MOVSX) {
+                std::cerr << before << "\n";
+                solver.push();
+                solver.add(before != 0);
+                if (solver.check() == z3::unsat) {
+                    const auto core = solver.unsat_core();
+                    for (const auto& expr : core) {
+                        std::cerr << expr << "n"
+                    }
+                }
+                solver.pop();
+            }
+
+        }
+        std::cerr << "\n";
+#endif
+        
         solver.push();
         {
             solver.add(eip == out_arch.eip);
@@ -612,6 +905,7 @@ void Context::explore_paths_rec_dst(Program& program, const ArchState& in_arch, 
         }
         solver.pop();
         solver.add(eip != out_arch.eip);
+        ++count;
     }
 }
 
@@ -623,20 +917,24 @@ void Context::explore_paths_rec_read(Program& program, const ArchState& in_arch,
     }
     
     const auto& sym_read = *read_it;
-    unsigned n = 0;
-    
+    unsigned count = 0;
     while (true) {
         const z3::check_result res = solver.check();
         if (res != z3::sat) {
             break;
         }
+        if (count > 0) {
+            std::cerr << "error: nondeterministic\n";
+            std::abort();
+        }
         const z3::model model = solver.get_model();
 
         MemState::Read con_read = sym_read.eval(model);
         const auto olddata = con_read.data;
-        con_read.data = model.eval(con_read(core, write_mask));
+        con_read.data = sym_read.data; // NOTE: this fixes bug maybe?
+        con_read.data = con_read(core, write_mask);
         
-        std::cerr << "read " << con_read.addr << " " << con_read.data << " (" << olddata << ")\n";
+        std::cerr << "read " << con_read.addr << " " << model.eval(con_read.data) << " (" << olddata << ")\n";
         
         solver.push();
         {
@@ -645,6 +943,7 @@ void Context::explore_paths_rec_read(Program& program, const ArchState& in_arch,
         }
         solver.pop();
         solver.add(con_read.addr != sym_read.addr);
+        ++count;
     }
 }
 
@@ -655,11 +954,15 @@ void Context::explore_paths_rec_write(Program& program, const ArchState& in_arch
     }
     
     const auto& sym_write = *write_it;
-
+    unsigned count = 0;
     while (true) {
         const z3::check_result res = solver.check();
         if (res != z3::sat) {
             break;
+        }
+        if (count > 0) {
+            std::cerr << "error: nondeterministic\n";
+            std::abort();
         }
         const z3::model model = solver.get_model();
         MemState::Write con_write = sym_write.eval(model);
@@ -677,6 +980,7 @@ void Context::explore_paths_rec_write(Program& program, const ArchState& in_arch
         solver.pop();
         
         solver.add(sym_write.addr != con_write.addr);
+        ++count;
     }
 }
 
@@ -710,7 +1014,13 @@ void Context::explore_paths_rec(Program& program, const ArchState& in_arch, z3::
     out_arch.create(next_id++);
     solver.add(out_arch == arch);
     
+    if (writes.size() == 0) {
+        assert(z3::eq(out_arch.mem.mem, in_arch.mem.mem));
+    }
+    
     std::cerr << "inst @ " << std::hex << addr << " : "  << inst.I->mnemonic << " " << inst.I->op_str << "\n";
+    
+    I = inst.I;
     
     explore_paths_rec_read(program, in_arch, out_arch, solver, write_mask, reads, writes, reads.begin());
     
@@ -742,7 +1052,7 @@ void Context::explore_paths(Program& program) {
         }
     }
     
-#if 0
+#if 1
     // set return address
     in_arch.mem.write(in_arch.esp, ctx.bv_val(0x42424242, 32), util::null_output_iterator());
     for (uint64_t i = 0; i < 4; ++i) {

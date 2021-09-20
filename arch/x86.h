@@ -39,7 +39,8 @@ XE(eip)
 #define X_x86_FLAGS(XB, XE)			\
 XB(cf, 0)					\
 XB(zf, 6)					\
-XE(sf, 7)
+XB(sf, 7) \
+XE(of, 11)
 
 #define X_x86_MEMS(XB, XE)			\
 XB(mem1)						\
@@ -145,6 +146,9 @@ struct ArchState {
     X_x86_FLAGS(ENT, ENT_);
 #undef ENT_
 #undef ENT
+    static constexpr std::size_t nxmms = 8;
+    static constexpr unsigned xmm_bits = 128;
+    std::vector<z3::expr> xmms;
     
     MemState mem;
     
@@ -167,6 +171,9 @@ struct ArchState {
         X_x86_FLAGS(ENT, ENT_);
 #undef ENT_
 #undef ENT
+        for (z3::expr& xmm : xmms) {
+            xmm = ctx().bv_val(0, xmm_bits);
+        }
     }
     
     z3::expr operator==(const ArchState& other) const;
@@ -388,26 +395,45 @@ struct Condition {
         E, // equal
         GE, // greater than or equal
         NE, // not equal
+        S, // SF == 1
+        B, // CF == 1
+        G, // greater
+        NS, // SF == 0
+        LE, // ZF == 1 || SF != OF
+        L,
+
     } kind;
     
     Condition(Kind kind): kind(kind) {}
     
     const char *str() const {
         switch (kind) {
-            case A: return "A";
-            case E: return "E";
+            case A:  return "A";
+            case E:  return "E";
             case GE: return "GE";
             case NE: return "NE";
+            case S:  return "S";
+            case B:  return "B";
+            case G:  return "G";
+            case NS: return "NS";
+            case LE: return "LE";
+            case L:  return "L";
             default: unimplemented("cc %d", kind);
         }
     }
     
     z3::expr operator()(const ArchState& arch) const {
         switch (kind) {
-            case A: return arch.cf == 0 && arch.zf == 0;
-            case E: return arch.zf == 1;
-            case GE: return arch.sf == 1;
+            case A:  return arch.cf == 0 && arch.zf == 0;
+            case E:  return arch.zf == 1;
+            case GE: return arch.sf == arch.of;
             case NE: return arch.zf == 0;
+            case S:  return arch.sf == 1;
+            case B:  return arch.cf == 1;
+            case G:  return arch.zf == 0 && arch.sf == arch.of;
+            case NS: return arch.sf == 1;
+            case LE: return arch.zf == 1 || arch.sf != arch.of;
+            case L:  return arch.sf != arch.of;
             default: unimplemented("cc %s", str());
         }
     }
@@ -433,6 +459,8 @@ struct Context {
     z3::expr path;
     const z3::expr idx;
     const z3::expr zero;
+    
+    const cs_insn *I;
     
     unsigned next_id = 0;
     z3::expr constant(const z3::sort& sort) {
