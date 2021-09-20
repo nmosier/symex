@@ -830,17 +830,25 @@ X_x86_REGS(ENT, ENT_), X_x86_FLAGS(ENT, ENT_), mem(ctx, sort.mem) {
 #undef ENT_
 #undef ENT
 
-void ArchState::create(unsigned id) {
-#define ENT(name) name = name.ctx().bv_const((std::string(#name) + std::to_string(id)).c_str(), 32);
+void ArchState::create(unsigned id, z3::solver& solver) {
+    const auto f = [&] (z3::expr& val, unsigned bits, const std::string& s_) {
+        if (!val.is_const()) {
+            const std::string s = s_ + "_" + std::to_string(id);
+            const z3::expr newval = val.ctx().bv_const(s.c_str(), bits);
+            solver.add(val == newval);
+            val = newval;
+        }
+    };
+    
+#define ENT(name) f(name, 32, #name);
     X_x86_REGS(ENT, ENT);
 #undef ENT
-#define ENT(name, ...) name = name.ctx().bv_const((std::string(#name) + std::to_string(id)).c_str(), 1);
+#define ENT(name, ...) f(name, 1, #name);
     X_x86_FLAGS(ENT, ENT);
+#undef ENT1
 #undef ENT
     for (std::size_t i = 0; i < nxmms; ++i) {
-        std::stringstream name;
-        name << "xmm" << i << "_" << id << "\n";
-        xmms[i] = ctx().bv_const(name.str().c_str(), xmm_bits);
+        f(xmms[i], 128, util::format("xmm_%d", i));
     }
 }
 
@@ -1011,8 +1019,7 @@ void Context::explore_paths_rec(Program& program, const ArchState& in_arch, z3::
     WriteVec writes;
     inst.transfer(arch, std::back_inserter(reads), std::back_inserter(writes));
     ArchState out_arch = arch;
-    out_arch.create(next_id++);
-    solver.add(out_arch == arch);
+    out_arch.create(next_id++, solver);
     
     if (writes.size() == 0) {
         assert(z3::eq(out_arch.mem.mem, in_arch.mem.mem));

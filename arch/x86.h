@@ -156,7 +156,7 @@ struct ArchState {
     
     ArchState(z3::context& ctx, const Sort& sort);
     
-    void create(unsigned id);
+    void create(unsigned id, z3::solver& solver);
     
     z3::context& ctx() const { return eax.ctx(); }
     

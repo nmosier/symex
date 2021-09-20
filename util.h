@@ -99,6 +99,24 @@ struct null_output_iterator {
     template <typename T>
     const T& operator=(const T& val) const { return val; }
 };
+
+inline std::system_error syserr(const std::string& what = "") {
+    return std::system_error(std::error_code(errno, std::generic_category()), what);
+}
+
+inline std::string format(const char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    char *s;
+    if (vasprintf(&s, fmt, ap) < 0) {
+        throw syserr();
+    }
+    const std::string res {s};
+    std::free(s);
+    va_end(ap);
+    return res;
+}
+
 }
 
 inline z3::expr operator==(const std::vector<z3::expr>& a, const std::vector<z3::expr>& b) {
@@ -111,3 +129,4 @@ inline z3::expr operator==(const std::vector<z3::expr>& a, const std::vector<z3:
     }
     return acc;
 }
+
