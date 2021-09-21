@@ -89,15 +89,19 @@ struct MemState {
         }
         
         z3::expr operator()(const cores::Core& core, const ByteMap& write_mask) const {
-            const uint64_t addr = this->addr.as_uint64();
-            const uint64_t core_data = (*this)(core);
+            uint64_t addr = this->addr.as_uint64();
             z3::expr data = this->data;
+            std::vector<z3::expr> res;
             for (unsigned i = 0; i < size(); ++i) {
+                z3::expr byte {ctx()};
                 if (write_mask.find(addr + i) == write_mask.end()) {
-                    data = z3::bv_store(data, ctx().bv_val((core_data >> (i * 8)) & 0xff, 8), i * 8);
+                    byte = ctx().bv_val(core.read<uint8_t>(addr + i), 8);
+                } else {
+                    byte = data.extract((i + 1) * 8 - 1, i * 8);
                 }
+                res.push_back(byte);
             }
-            return data;
+            return z3::concat(res.rbegin(), res.rend());
         }
     };
     
@@ -137,6 +141,10 @@ struct MemState {
     
     template <typename OutputIt>
     void write(const z3::expr& address, const z3::expr& value, OutputIt write_out);
+    
+private:
+    z3::expr read_aligned(const z3::expr& addr_hi, const z3::expr& addr_lo, unsigned size) const;
+    z3::expr read_unaligned(const z3::expr& addr_hi, const z3::expr& addr_lo, unsigned size) const;
 };
 
 struct ArchState {

@@ -87,6 +87,16 @@ inline expr bool_to_bv(const z3::expr& e) {
     return z3::ite(e, e.ctx().bv_val(1, 1), e.ctx().bv_val(0, 1));
 }
 
+template <typename InputIt>
+inline expr concat(InputIt begin, InputIt end) {
+    auto it = begin;
+    z3::expr acc = *it++;
+    while (it != end) {
+        acc = z3::concat(acc, *it++);
+    }
+    return acc;
+}
+
 }
 
 

@@ -668,60 +668,23 @@ std::ostream& operator<<(std::ostream& os, const ArchState& arch) {
 
 
 MemState::MemState(z3::context& ctx, const Sort& sort): ctx(ctx), mem(ctx) {
-    mem = ctx.constant("mem", ctx.array_sort(ctx.bv_sort(32 - 2), ctx.bv_sort(32)));
+    mem = ctx.constant("mem", ctx.array_sort(ctx.bv_sort(32), ctx.bv_sort(8)));
 }
 
 template <typename OutputIt>
 z3::expr MemState::read(const z3::expr& address, unsigned size, OutputIt read_out) const {
     // TODO: For now, assumed aligned accesses.
     z3::context& ctx = address.ctx();
-    z3::expr addr_hi = address.extract(31, 2);
-    z3::expr dword = mem[addr_hi];
-    
-    *read_out++ = Read {z3::concat(addr_hi, ctx.bv_val(0, 2)), dword};
-    
-    switch (size) {
-        case 4:
-            // solver.add(address.extract(1, 0) == address.ctx().bv_val(0, 2));
-            return dword;
-            
-        case 2:
-            // solver.add(address.extract(0, 0) == address.ctx().bv_val(0, 1));
-            return z3::ite(address.extract(2, 2) == ctx.bv_val(0, 1), dword.extract(15, 0), dword.extract(31, 16));
-            
-        case 1: {
-            const z3::expr idx = address.extract(1, 0);
-            z3::expr res {ctx};
-            for (unsigned i = 0; i < 4; ++i) {
-                const z3::expr cmp_idx = ctx.bv_val(i, 2);
-                const z3::expr cmp = (idx == cmp_idx);
-                unsigned hi = (i + 1) * 8 - 1;
-                unsigned lo = i * 8;
-                z3::expr byte = dword.extract(hi, lo);
-                if (i == 0) {
-                    res = dword.extract(hi, lo);
-                } else {
-                    res = z3::ite(cmp, byte, res);
-                }
-            }
-            return res;
-        }
-            
-        case 16: {
-            z3::expr_vector res {ctx};
-            // TODO: assert that this can't happen.
-            addr_hi = address.extract(31, 4);
-            for (unsigned i = 0; i < 4; ++i) {
-                res.push_back(mem[z3::concat(addr_hi, ctx.bv_val(i, 2))]);
-            }
-            return z3::concat(res);
-        }
-            
-            
-        default: unimplemented("size %u", size);
+        
+    std::vector<z3::expr> little;
+    for (unsigned i = 0; i < size; ++i) {
+        little.push_back(mem[address + ctx.bv_val(i, 32)]);
     }
+    const z3::expr res = z3::concat(little.rbegin(), little.rend());
+    
+    *read_out++ = Read {address, res};
+    return res;
 }
-
 
 z3::expr Register::read(const ArchState& arch) const {
     switch (reg) {
@@ -788,33 +751,13 @@ void Register::write(ArchState& arch, const z3::expr& e) const {
 
 template <typename OutputIt>
 void MemState::write(const z3::expr& address, const z3::expr& value, OutputIt write_out) {
-    const unsigned size = value.get_sort().bv_size() / 8;
-    const z3::expr addr_hi = address.extract(31, 2);
-    const z3::expr addr_lo = address.extract(1, 0);
-    z3::expr dword = mem[addr_hi];
-    
-    switch (size) {
-        case 4:
-            dword = value;
-            break;
-            
-        case 2: {
-            dword = z3::ite(addr_lo.extract(1, 1) == 0, z3::concat(dword.extract(31, 16), value), z3::concat(value, dword.extract(15, 0)));
-            // solver.add(addr_lo.extract(0, 0) == ctx.bv_val(0, 1));
-            break;
-        }
-            
-        case 1: {
-            dword = z3::ite(addr_lo == 0, z3::concat(dword.extract(31, 8), value),
-                            z3::ite(addr_lo == 1, z3::concat(dword.extract(31, 16), value, dword.extract(7, 0)),
-                                    z3::ite(addr_lo == 2, z3::concat(dword.extract(31, 24), value, dword.extract(15, 0)),
-                                            z3::concat(value, dword.extract(23, 0)))));
-            break;
-        }
-            
+    z3::context& ctx = value.ctx();
+    const unsigned bits = value.get_sort().bv_size();
+    const unsigned size = bits / 8;
+    for (unsigned i = 0; i < size; ++i) {
+        mem = z3::store(mem, address + ctx.bv_val(i, 32), value.extract((i + 1) * 8 - 1, i * 8));
     }
-    mem = z3::store(mem, addr_hi, dword);
-    *write_out++ = Write {address, dword};
+    *write_out = Write {address, value};
  }
 
 
@@ -879,33 +822,7 @@ void Context::explore_paths_rec_dst(Program& program, const ArchState& in_arch, 
         const z3::model model = solver.get_model();
         const z3::expr eip = model.eval(out_arch.eip);
         std::cerr << "dst " << eip << "\n";
-        
-#if 0
-        // DEBUG
-        std::cerr << I->mnemonic << " " << I->op_str << ": ";
-        for (unsigned i = 0; i < I->detail->x86.op_count; ++i) {
-            const Operand op {I->detail->x86.operands[i]};
-            const auto before = op.read(in_arch, util::null_output_iterator()).simplify();
-            const auto after = op.read(out_arch, util::null_output_iterator()).simplify();
-            std::cerr << model.eval(before) << "/" << model.eval(after) << "\n";
-            
-            if (I->id == X86_INS_MOVSX) {
-                std::cerr << before << "\n";
-                solver.push();
-                solver.add(before != 0);
-                if (solver.check() == z3::unsat) {
-                    const auto core = solver.unsat_core();
-                    for (const auto& expr : core) {
-                        std::cerr << expr << "n"
-                    }
-                }
-                solver.pop();
-            }
-
-        }
-        std::cerr << "\n";
-#endif
-        
+         
         solver.push();
         {
             solver.add(eip == out_arch.eip);
@@ -925,6 +842,17 @@ void Context::explore_paths_rec_read(Program& program, const ArchState& in_arch,
     }
     
     const auto& sym_read = *read_it;
+    
+    // DEBUG: check for misaligned reads
+    solver.push();
+    {
+        const z3::expr mask = ctx.bv_val((unsigned) sym_read.size() - 1, 32);
+        solver.add((sym_read.addr & mask) != 0);
+        const auto res = solver.check();
+        assert(res == z3::unsat);
+    }
+    solver.pop();
+    
     unsigned count = 0;
     while (true) {
         const z3::check_result res = solver.check();
@@ -962,6 +890,19 @@ void Context::explore_paths_rec_write(Program& program, const ArchState& in_arch
     }
     
     const auto& sym_write = *write_it;
+    
+    // DEBUG: check for misaligned writes
+#if 0
+    solver.push();
+    {
+        const z3::expr mask = ctx.bv_val((unsigned) sym_write.size() - 1, 32);
+        solver.add((sym_write.addr & mask) != 0);
+        const auto res = solver.check();
+        assert(res == z3::unsat);
+    }
+    solver.pop();
+#endif
+    
     unsigned count = 0;
     while (true) {
         const z3::check_result res = solver.check();
