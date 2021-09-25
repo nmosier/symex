@@ -1,5 +1,6 @@
 #include <vector>
 #include <cstdint>
+#include <unistd.h>
 #define _XOPEN_SOURCE
 #include <mach/i386/processor_info.h>
 #include <mach/i386/_structs.h>
@@ -8,6 +9,8 @@
 #include <mach/i386/thread_status.h>
 
 #include "x86.h"
+#include "program.h"
+#include "context.h"
 
 csh g_handle;
 
@@ -82,6 +85,6 @@ int main(int argc, char *argv[]) {
     
     std::cerr << ctx.core.nsegments() << " segments\n";
     
-    ctx.explore_paths(program);
+    ctx.explore_paths();
     
 }

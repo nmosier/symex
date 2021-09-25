@@ -9,4 +9,10 @@ add_executable(x86-test
   ../cores/macho.cc
   ../cores/minidump.cc
   ../cores/file.cc
+  explore.cc
+  memstate.cc
+  inst.cc
+  operands.cc
+  archstate.cc
+  context.cc
   )

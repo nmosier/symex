@@ -10,7 +10,7 @@
   std::abort()
 
 #define report(msg, ...) \
-fprintf(stderr, "report: " msg "\n", __VA_ARGS__)
+fprintf(stderr, "report: " msg "\n", __VA_ARGS__)()
 
 template <typename T>
 T swap_endianness(T in) {
