@@ -2,11 +2,15 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <string>
 #include <z3++.h>
 
 #define unimplemented(msg, ...)			\
   fprintf(stderr, "%s:%d: unimplemented: " msg "\n", __FILE__, __LINE__, __VA_ARGS__); \
   std::abort()
+
+#define report(msg, ...) \
+fprintf(stderr, "report: " msg "\n", __VA_ARGS__)
 
 template <typename T>
 T swap_endianness(T in) {
@@ -151,4 +155,5 @@ inline z3::expr operator==(const std::vector<z3::expr>& a, const std::vector<z3:
     }
     return acc;
 }
+
 

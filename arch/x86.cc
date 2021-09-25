@@ -744,6 +744,7 @@ void Register::write(ArchState& arch, const z3::expr& e) const {
             
         case X86_REG_AL: arch.eax = z3::bv_store(arch.eax, e, 0); break;
         case X86_REG_BL: arch.ebx = z3::bv_store(arch.ebx, e, 0); break;
+        case X86_REG_CL: arch.ecx = z3::bv_store(arch.ecx, e, 0); break;
             
         default:
             unimplemented("reg %s", cs_reg_name(g_handle, reg));
@@ -986,6 +987,28 @@ void Context::explore_paths_rec_write(Program& program, const ArchState& in_arch
     }
 }
 
+void Context::check_accesses(const ReadVec& reads, const WriteVec& writes, z3::solver& solver) {
+    for (const auto& read : reads) {
+        if (solver.check() != z3::sat) { return; }
+        const z3::model model = solver.get_model();
+        z3::scope scope {solver};
+        solver.add(read.addr != model.eval(read.addr));
+        if (solver.check() == z3::sat) {
+            report("read at %p has multiple source addresses", (void *) model.eval(read.addr).as_uint64());
+        }
+    }
+    
+    for (const auto& write : writes) {
+        if (solver.check() != z3::sat) { return; }
+        const z3::model model = solver.get_model();
+        z3::scope scope {solver};
+        solver.add(write.addr != model.eval(write.addr));
+        if (solver.check() == z3::sat) {
+            report("write at %p has multiple destination addresses", (void *) model.eval(write.addr).as_uint64());
+        }
+    }
+}
+
 void Context::explore_paths_loop(Program& program, const ArchState& init_arch, z3::solver& solver, const ByteMap& init_write_mask) {
     struct Entry {
         ArchState in, out;
@@ -1005,6 +1028,12 @@ void Context::explore_paths_loop(Program& program, const ArchState& init_arch, z
     while (!stack.empty()) {
 
         const Entry& entry = stack.back();
+        
+        /* perform checks */
+        // memory access addresses only have 1 possibility
+        check_accesses(entry.reads, entry.writes, solver);
+        
+        
         
         const std::optional<Assignment> assignment = explore_paths_find_assigment(program, entry.in, entry.out, solver, entry.mask, entry.reads, entry.writes);
         

@@ -562,8 +562,7 @@ struct Context {
     
     void explore_paths_rec(Program& program, const ArchState& in_arch, z3::solver& solver, addr_t addr, ByteMap write_mask);
     
-//    void strncpy(const ArchState& in_arch, ArchState ) const;
-    // 
+    void check_accesses(const ReadVec& reads, const WriteVec& writes, z3::solver& solver);
 };
 
 std::ostream& dump_trace(std::ostream& os, const std::vector<const cs_insn *>& trace);
