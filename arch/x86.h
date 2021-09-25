@@ -550,7 +550,7 @@ struct Context {
     
     std::optional<Assignment> explore_paths_find_assigment(Program& program, const ArchState& in_arch, const ArchState& out_arch, z3::solver& solver, ByteMap write_mask, const ReadVec& reads, const WriteVec& writes);
     
-    void explore_paths_loop(Program& program, const ArchState& in_arch, z3::solver& solver);
+    void explore_paths_loop(Program& program, const ArchState& in_arch, z3::solver& solver, const ByteMap& init_write_mask);
     
     void explore_paths(Program& program);
 

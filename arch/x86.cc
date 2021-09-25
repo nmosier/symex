@@ -986,7 +986,7 @@ void Context::explore_paths_rec_write(Program& program, const ArchState& in_arch
     }
 }
 
-void Context::explore_paths_loop(Program& program, const ArchState& init_arch, z3::solver& solver) {
+void Context::explore_paths_loop(Program& program, const ArchState& init_arch, z3::solver& solver, const ByteMap& init_write_mask) {
     struct Entry {
         ArchState in, out;
         ByteMap mask;
@@ -996,9 +996,11 @@ void Context::explore_paths_loop(Program& program, const ArchState& init_arch, z
     };
     
     std::vector<Entry> stack = {
-        {.in = init_arch, .out = init_arch, .mask = {}, .reads = {}, .writes = {}, .pred = ctx.bool_val(true)}
+        {.in = init_arch, .out = init_arch, .mask = init_write_mask, .reads = {}, .writes = {}, .pred = ctx.bool_val(true)}
     };
     solver.push();
+    
+    unsigned trace_id = 0;
     
     while (!stack.empty()) {
 
@@ -1018,8 +1020,15 @@ void Context::explore_paths_loop(Program& program, const ArchState& init_arch, z
                 });
                 if (seg_it == core.segments_end()) {
                     std::cerr << "jump outside of address space: " << std::hex << addr << "\n";
-                    dump_trace("trace.asm", trace);
+                    std::stringstream ss;
+                    ss << "trace" << trace_id++ << ".asm";
+                    dump_trace(ss.str(), trace);
+#if 0
                     return; // TODO: don't return
+#else
+                    solver.add(!assignment->pred);
+                    continue;
+#endif
                 }
                 // TODO: make this safer
                 const void *data = seg_it->at(addr);
@@ -1045,10 +1054,9 @@ void Context::explore_paths_loop(Program& program, const ArchState& init_arch, z
             
         } else {
             std::cerr << "BACKTRACKING\n";
-            
-            stack.pop_back();
             solver.pop();
             solver.add(!entry.pred);
+            stack.pop_back();
         }
         
     }
@@ -1139,7 +1147,7 @@ void Context::explore_paths(Program& program) {
 #if 0
     explore_paths_rec(program, in_arch, solver, state.__eip, write_mask);
 #else
-    explore_paths_loop(program, in_arch, solver);
+    explore_paths_loop(program, in_arch, solver, write_mask);
 #endif
 }
 
