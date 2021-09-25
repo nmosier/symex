@@ -992,10 +992,11 @@ void Context::explore_paths_loop(Program& program, const ArchState& init_arch, z
         ByteMap mask;
         ReadVec reads;
         WriteVec writes;
+        z3::expr pred;
     };
     
     std::vector<Entry> stack = {
-        {.in = init_arch, .out = init_arch, .mask = {}, .reads = {}, .writes = {}}
+        {.in = init_arch, .out = init_arch, .mask = {}, .reads = {}, .writes = {}, .pred = ctx.bool_val(true)}
     };
     solver.push();
     
@@ -1006,7 +1007,6 @@ void Context::explore_paths_loop(Program& program, const ArchState& init_arch, z
         const std::optional<Assignment> assignment = explore_paths_find_assigment(program, entry.in, entry.out, solver, entry.mask, entry.reads, entry.writes);
         
         if (assignment) {
-            
             solver.push();
             solver.add(assignment->pred);
             const addr_t addr = assignment->eip;
@@ -1041,13 +1041,14 @@ void Context::explore_paths_loop(Program& program, const ArchState& init_arch, z
             std::cerr << "inst @ " << std::hex << addr << " : "  << inst.I->mnemonic << " " << inst.I->op_str << "\n";
             I = inst.I;
             
-            stack.push_back({.in = entry.out, .out = out_arch, .mask = assignment->mask, .reads = reads, .writes = writes});
+            stack.push_back({.in = entry.out, .out = out_arch, .mask = assignment->mask, .reads = reads, .writes = writes, .pred = assignment->pred});
             
         } else {
             std::cerr << "BACKTRACKING\n";
             
             stack.pop_back();
             solver.pop();
+            solver.add(!entry.pred);
         }
         
     }
