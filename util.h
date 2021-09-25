@@ -97,6 +97,18 @@ inline expr concat(InputIt begin, InputIt end) {
     return acc;
 }
 
+struct eval {
+    const z3::model& model;
+    eval(const z3::model& model): model(model) {}
+    z3::expr operator()(const z3::expr& e) const { return model.eval(e); }
+};
+
+struct scope {
+    z3::solver& solver;
+    scope(z3::solver& solver): solver(solver) { solver.push(); }
+    ~scope() { solver.pop(); }
+};
+
 }
 
 

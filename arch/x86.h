@@ -537,11 +537,23 @@ struct Context {
     }
 #endif
     
+    using Read = MemState::Read;
+    using Write = MemState::Write;
+    using ReadVec = std::vector<Read>;
+    using WriteVec = std::vector<Write>;
+    
+    struct Assignment {
+        z3::expr pred;
+        addr_t eip;
+        ByteMap mask;
+    };
+    
+    std::optional<Assignment> explore_paths_find_assigment(Program& program, const ArchState& in_arch, const ArchState& out_arch, z3::solver& solver, ByteMap write_mask, const ReadVec& reads, const WriteVec& writes);
+    
+    void explore_paths_loop(Program& program, const ArchState& in_arch, z3::solver& solver);
+    
     void explore_paths(Program& program);
 
-    using ReadVec = std::vector<MemState::Read>;
-    using WriteVec = std::vector<MemState::Write>;
-    
     void explore_paths_rec_dst(Program& program, const ArchState& in_arch, const ArchState& out_arch, z3::solver& solver, const ByteMap& write_mask);
     
     void explore_paths_rec_read(Program& program, const ArchState& in_arch, const ArchState& out_arch, z3::solver& solver, const ByteMap& write_mask, const ReadVec& reads, const WriteVec& writes, ReadVec::const_iterator read_it);

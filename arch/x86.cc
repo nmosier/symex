@@ -1,5 +1,6 @@
 #include <vector>
 #include <fstream>
+#include <numeric>
 
 #include "capstone++.h"
 
@@ -804,6 +805,58 @@ z3::expr ArchState::operator==(const ArchState& other) const {
 #undef ENT_
 }
 
+std::optional<Context::Assignment> Context::explore_paths_find_assigment(Program& program, const ArchState& in_arch, const ArchState& out_arch, z3::solver& solver, ByteMap write_mask, const ReadVec& reads, const WriteVec& writes) {
+    
+    z3::scope scope {solver};
+    
+    z3::model model {ctx};
+    const auto recheck = [&] {
+        const z3::check_result res = solver.check();
+        if (res != z3::sat) {
+            return false;
+        } else {
+            model = solver.get_model();
+            return true;
+        }
+    };
+    
+#define recheck() if (!(recheck)()) { return std::nullopt; }
+    
+    recheck();
+    
+    z3::expr acc = ctx.bool_val(true);
+    const auto add = [&] (const z3::expr& e) {
+        acc = acc && e;
+    };
+    
+    // concretize reads
+    for (const Read& sym_read : reads) {
+        // TODO: clean this code/API up
+        Read con_read = sym_read.eval(model);
+        con_read.data = sym_read.data;
+        con_read.data = con_read(core, write_mask);
+        add(con_read == sym_read);
+        solver.add(con_read == sym_read);
+    }
+
+    recheck();
+    
+    // concretize writes
+    for (const Write& sym_write : writes) {
+        Write con_write = sym_write.eval(model);
+        add(sym_write.addr == con_write.addr);
+        for (unsigned i = 0; i < con_write.size(); ++i) {
+            write_mask.insert(con_write.addr.as_uint64() + i);
+        }
+    }
+    
+    // concretize dst
+    add(out_arch.eip == model.eval(out_arch.eip));
+    
+    return Assignment {.pred = acc, .eip = static_cast<addr_t>(model.eval(out_arch.eip).as_uint64()), .mask = write_mask};
+#undef recheck
+}
+
 void Context::explore_paths_rec_dst(Program& program, const ArchState& in_arch, const ArchState& out_arch, z3::solver& solver, const ByteMap& write_mask) {
     unsigned count = 0;
     while (true) {
@@ -933,6 +986,74 @@ void Context::explore_paths_rec_write(Program& program, const ArchState& in_arch
     }
 }
 
+void Context::explore_paths_loop(Program& program, const ArchState& init_arch, z3::solver& solver) {
+    struct Entry {
+        ArchState in, out;
+        ByteMap mask;
+        ReadVec reads;
+        WriteVec writes;
+    };
+    
+    std::vector<Entry> stack = {
+        {.in = init_arch, .out = init_arch, .mask = {}, .reads = {}, .writes = {}}
+    };
+    solver.push();
+    
+    while (!stack.empty()) {
+
+        const Entry& entry = stack.back();
+        
+        const std::optional<Assignment> assignment = explore_paths_find_assigment(program, entry.in, entry.out, solver, entry.mask, entry.reads, entry.writes);
+        
+        if (assignment) {
+            
+            solver.push();
+            solver.add(assignment->pred);
+            const addr_t addr = assignment->eip;
+            
+            if (program.map.find(addr) == program.map.end()) {
+                // find address in core
+                const auto seg_it = std::find_if(core.segments_begin(), core.segments_end(), [&] (const cores::Segment& seg) {
+                    return seg.contains(addr, 1);
+                });
+                if (seg_it == core.segments_end()) {
+                    std::cerr << "jump outside of address space: " << std::hex << addr << "\n";
+                    dump_trace("trace.asm", trace);
+                    return; // TODO: don't return
+                }
+                // TODO: make this safer
+                const void *data = seg_it->at(addr);
+                program.disasm((const uint8_t *) data, 16, addr, 1);
+            }
+            
+            const Inst& inst = program.map.at(addr);
+            
+            trace.push_back(inst.I);
+            
+            const ArchState& in_arch = entry.out;
+            ArchState arch = in_arch;
+            ReadVec reads;
+            WriteVec writes;
+            inst.transfer(arch, std::back_inserter(reads), std::back_inserter(writes));
+            ArchState out_arch = arch;
+            out_arch.create(next_id++, solver);
+            
+            std::cerr << "inst @ " << std::hex << addr << " : "  << inst.I->mnemonic << " " << inst.I->op_str << "\n";
+            I = inst.I;
+            
+            stack.push_back({.in = entry.out, .out = out_arch, .mask = assignment->mask, .reads = reads, .writes = writes});
+            
+        } else {
+            std::cerr << "BACKTRACKING\n";
+            
+            stack.pop_back();
+            solver.pop();
+        }
+        
+    }
+    
+}
+
 void Context::explore_paths_rec(Program& program, const ArchState& in_arch, z3::solver& solver, addr_t addr, ByteMap write_mask) {
     // add instructions until branch
     
@@ -1014,7 +1135,11 @@ void Context::explore_paths(Program& program) {
     solver.pop();
 #endif
     
+#if 0
     explore_paths_rec(program, in_arch, solver, state.__eip, write_mask);
+#else
+    explore_paths_loop(program, in_arch, solver);
+#endif
 }
 
 std::ostream& dump_trace(std::ostream& os, const std::vector<const cs_insn *>& trace) {
