@@ -58,8 +58,8 @@ std::optional<Context::Assignment> Context::explore_paths_find_assigment(const A
         z3::scope scope {solver};
         solver.add(out_arch.eip != model.eval(out_arch.eip));
         if (solver.check() == z3::sat) {
-            std::cerr << "DSTS: " << in_arch.eip << "\n";
-            std::abort();
+            std::cerr << "DSTS: " << in_arch.eip.simplify() << "\n";
+            // std::abort();
         }
         
     }
@@ -236,6 +236,13 @@ void Context::check_operands(const Inst& I, const ArchState& arch, z3::solver& s
                 }
             }
         }
+    }
+}
+
+void Context::check_regs(const ArchState& arch) {
+    // esp should be constant
+    if (!arch.esp.simplify().is_const()) {
+        report("non-constant esp");
     }
 }
 

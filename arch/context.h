@@ -22,6 +22,8 @@ struct Context {
     std::vector<std::unique_ptr<Peephole>> peepholes;
     std::vector<const cs_insn *> trace;
     
+    ~Context() { std::cerr << "trace " << trace.size() << "\n"; }
+    
     const z3::expr zero;
     
     const cs_insn *I;
@@ -70,6 +72,7 @@ struct Context {
     
     void check_accesses(const ReadVec& reads, const WriteVec& writes, z3::solver& solver);
     void check_operands(const Inst& I, const ArchState& arch, z3::solver& solver);
+    void check_regs(const ArchState& arch);
 };
 
 }

@@ -10,7 +10,7 @@
   std::abort()
 
 #define report(msg, ...) \
-fprintf(stderr, "report: " msg "\n", __VA_ARGS__)()
+fprintf(stderr, "report: " msg "\n", ##__VA_ARGS__)
 
 template <typename T>
 T swap_endianness(T in) {
@@ -157,3 +157,13 @@ inline z3::expr operator==(const std::vector<z3::expr>& a, const std::vector<z3:
 }
 
 
+namespace util {
+
+template <typename T>
+std::string to_string(const T& x) {
+    std::stringstream ss;
+    ss << x;
+    return ss.str();
+}
+
+}

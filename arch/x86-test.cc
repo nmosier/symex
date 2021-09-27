@@ -30,6 +30,7 @@ Options:
  -h               show help
  -s <addr>,<len>  make memory range symbolic
 )=";
+    fprintf(f, s, prog);
 }
 
 uint64_t parse_uint64(const char *s) {

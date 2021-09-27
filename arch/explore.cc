@@ -21,6 +21,7 @@ void Context::explore_paths_loop(const ArchState& init_arch, z3::solver& solver,
     solver.push();
     
     unsigned trace_id = 0;
+    trace.push_back(program.disasm(init_arch.eip.as_uint64())->I);
     
     while (!stack.empty()) {
 
@@ -29,8 +30,10 @@ void Context::explore_paths_loop(const ArchState& init_arch, z3::solver& solver,
         /* perform checks */
         // memory access addresses only have 1 possibility
         check_accesses(entry.reads, entry.writes, solver);
+        check_regs(entry.out);
         
         const std::optional<Assignment> assignment = explore_paths_find_assigment(entry.in, entry.out, solver, entry.mask, entry.reads, entry.writes);
+        
         
         if (assignment) {
             solver.push();
@@ -43,7 +46,9 @@ void Context::explore_paths_loop(const ArchState& init_arch, z3::solver& solver,
                 std::stringstream ss;
                 ss << "trace" << trace_id++ << ".asm";
                 dump_trace(ss.str(), trace);
+                solver.pop();
                 solver.add(!assignment->pred);
+                // stack.pop_back();
                 continue;
             }
             
@@ -51,6 +56,8 @@ void Context::explore_paths_loop(const ArchState& init_arch, z3::solver& solver,
             
             const ArchState& in_arch = entry.out;
             ArchState arch = in_arch;
+            arch.eip = ctx.bv_val(assignment->eip, 32);
+            arch.simplify();
             ReadVec reads;
             WriteVec writes;
             const auto read_out = std::back_inserter(reads);
@@ -68,28 +75,25 @@ void Context::explore_paths_loop(const ArchState& init_arch, z3::solver& solver,
                 inst->transfer(arch, read_out, write_out);
             }
             
-            
-            
             ArchState out_arch = arch;
             out_arch.create(next_id++, solver);
             
             std::cerr << "inst @ " << std::hex << addr << " : "  << inst->I->mnemonic << " " << inst->I->op_str << "\n";
             I = inst->I;
             
-            check_operands(*inst, out_arch, solver);
-
+            // check_operands(*inst, out_arch, solver);
             
             stack.push_back({.in = entry.out, .out = out_arch, .mask = assignment->mask, .reads = reads, .writes = writes, .pred = assignment->pred});
             
         } else {
-            std::cerr << "BACKTRACKING\n";
             solver.pop();
             solver.add(!entry.pred);
             stack.pop_back();
+            trace.pop_back();
         }
-        
     }
     
+    // solver.pop();
 }
 
 void Context::explore_paths_rec(Program& program, const ArchState& in_arch, z3::solver& solver, addr_t addr, ByteMap write_mask) {

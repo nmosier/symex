@@ -62,6 +62,16 @@ struct ArchState {
         }
     }
     
+    void simplify() {
+#define ENT(name, ...) name = name.simplify();
+        X_x86_REGS(ENT, ENT);
+        X_x86_FLAGS(ENT, ENT);
+#undef ENT
+        for (z3::expr& xmm : xmms) {
+            xmm = xmm.simplify();
+        }
+    }
+    
     z3::expr operator==(const ArchState& other) const;
 };
 
