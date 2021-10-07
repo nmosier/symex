@@ -5,7 +5,7 @@
 #include <cstring>
 #include <vector>
 
-#include "capstone/capstone.h"
+#include <capstone/capstone.h>
 
 namespace cs {
 

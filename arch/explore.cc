@@ -24,7 +24,7 @@ void Context::explore_paths_loop(const ArchState& init_arch, z3::solver& solver,
     trace.push_back(program.disasm(init_arch.eip.as_uint64())->I);
     
     while (!stack.empty()) {
-
+        
         const Entry& entry = stack.back();
         
         /* perform checks */
@@ -40,6 +40,11 @@ void Context::explore_paths_loop(const ArchState& init_arch, z3::solver& solver,
             solver.add(assignment->pred);
             const addr_t addr = assignment->eip;
             
+            ReadVec reads;
+            WriteVec writes;
+            const auto read_out = std::back_inserter(reads);
+            const auto write_out = std::back_inserter(writes);
+            
             const Inst *inst = program.disasm(addr);
             if (inst == nullptr) {
                 std::cerr << "jump outside of address space: " << std::hex << addr << "\n";
@@ -52,34 +57,59 @@ void Context::explore_paths_loop(const ArchState& init_arch, z3::solver& solver,
                 continue;
             }
             
-            trace.push_back(inst->I);
-            
-            const ArchState& in_arch = entry.out;
-            ArchState arch = in_arch;
-            arch.eip = ctx.bv_val(assignment->eip, 32);
-            arch.simplify();
-            ReadVec reads;
-            WriteVec writes;
-            const auto read_out = std::back_inserter(reads);
-            const auto write_out = std::back_inserter(writes);
-            
-            bool match = false;
-            for (const auto& peephole : peepholes) {
-                if ((*peephole)(addr, program, arch, read_out, write_out)) {
-                    match = true;
-                    break;
+            // add to CFG
+            cfg.add(addr);
+
+            // DEBUG: get & print loops
+            std::optional<ArchState> loop_out;
+            {
+                std::vector<CFG::Loop> loops;
+                cfg.get_loops(addr, std::back_inserter(loops));
+                for (auto& loop : loops) {
+#if 0
+                    if (const auto loop_out_ = loop.analyze(entry.out, solver, reads, writes)) {
+                        loop_out = loop_out_;
+                        break;
+                    }
+#else
+                    loop.analyze2(entry.out, solver, *this);
+#endif
                 }
             }
             
-            if (!match) {
-                inst->transfer(arch, read_out, write_out);
+            ArchState out_arch {ctx};
+            
+            if (loop_out) {
+                std::cerr << "LOOP FOUND\n";
+                out_arch = *loop_out;
+            } else {
+                
+                trace.push_back(inst->I);
+                
+                const ArchState& in_arch = entry.out;
+                ArchState arch = in_arch;
+                arch.eip = ctx.bv_val(assignment->eip, 32);
+                arch.simplify();
+                
+                bool match = false;
+                for (const auto& peephole : peepholes) {
+                    if ((*peephole)(addr, program, arch, read_out, write_out)) {
+                        match = true;
+                        break;
+                    }
+                }
+                
+                if (!match) {
+                    inst->transfer(arch, read_out, write_out);
+                }
+                
+                out_arch = arch;
+                out_arch.create(next_id++, solver);
+                
+                std::cerr << "inst @ " << std::hex << addr << " : "  << inst->I->mnemonic << " " << inst->I->op_str << "\n";
+                I = inst->I;
+                
             }
-            
-            ArchState out_arch = arch;
-            out_arch.create(next_id++, solver);
-            
-            std::cerr << "inst @ " << std::hex << addr << " : "  << inst->I->mnemonic << " " << inst->I->op_str << "\n";
-            I = inst->I;
             
             // check_operands(*inst, out_arch, solver);
             
@@ -155,7 +185,7 @@ void Context::explore_paths() {
 #define ENT(name, bit) in_arch.name = ctx.bv_val((state.__eflags >> bit) & 1, 1);
     X_x86_FLAGS(ENT, ENT);
 #undef ENT
-        
+    
     ByteMap write_mask;
     for (const auto& range : symbolic_ranges) {
         for (uint64_t addr = range.base; addr < range.base + range.len; ++addr) {
@@ -176,6 +206,44 @@ void Context::explore_paths() {
     solver.pop();
     
     explore_paths_loop(in_arch, solver, write_mask);
+}
+
+
+
+
+std::optional<z3::model> Context::find_execution(z3::solver& solver, const ReadVec& reads) const {
+    z3::context& ctx = solver.ctx();
+    const z3::expr mem = MemState::get_init_mem(ctx);
+    std::unordered_set<addr_t> read_set;
+    while (true) {
+        /* check whether any execution exists */
+        if (solver.check() != z3::sat) {
+            return std::nullopt;
+        }
+        const z3::eval eval {solver.get_model()};
+        
+        /* check if any new bytes were read */
+        // TODO: This can be optimized by also looking at written bytes. Also by knowing previous read set.
+        bool change = false;
+        for (const Read& read : reads) {
+            for (std::size_t i = 0; i < read.size(); ++i) {
+                const z3::expr addr = eval(read.addr + ctx.bv_val(static_cast<unsigned>(i), 32));
+                const uint32_t addr_ = addr.get_numeral_uint64();
+                if (read_set.insert(addr_).second) {
+                    std::stringstream ss;
+                    static unsigned junk = 0;
+                    ss << "init-" << addr << "-" << junk++;
+                    solver.add(mem[addr] == core.read<uint8_t>(addr_), ss.str().c_str());
+                    change = true;
+                }
+            }
+        }
+        if (!change) {
+            break;
+        }
+    }
+    
+    return solver.get_model();
 }
 
 }

@@ -29,8 +29,8 @@ z3::expr MemState::Read::operator()(const cores::Core& core, const ByteMap& writ
     return z3::concat(res.rbegin(), res.rend());
 }
 
-MemState::MemState(z3::context& ctx): ctx(ctx), mem(ctx) {
-    mem = ctx.constant("mem", ctx.array_sort(ctx.bv_sort(32), ctx.bv_sort(8)));
+MemState::MemState(z3::context& ctx): ctx_(&ctx), mem(ctx) {
+    mem = get_init_mem(ctx);
 }
 
 }

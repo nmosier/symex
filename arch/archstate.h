@@ -62,39 +62,23 @@ struct ArchState {
         }
     }
     
+    void transform_expr(std::function<z3::expr (const z3::expr&)> f);
+    
     void simplify() {
-#define ENT(name, ...) name = name.simplify();
-        X_x86_REGS(ENT, ENT);
-        X_x86_FLAGS(ENT, ENT);
-#undef ENT
-        for (z3::expr& xmm : xmms) {
-            xmm = xmm.simplify();
-        }
+        transform_expr([] (const z3::expr& e) -> z3::expr { return e.simplify(); });
     }
+    
+    void substitute(const z3::expr_vector& src, const z3::expr_vector& dst) {
+        transform_expr([&src, &dst] (z3::expr e) -> z3::expr {
+            return e.substitute(src, dst);
+        });
+    }
+    
+    void symbolic();
     
     z3::expr operator==(const ArchState& other) const;
 };
 
 std::ostream& operator<<(std::ostream& os, const ArchState& arch);
-
-#if 0
-struct ArchState::Sort {
-    z3::sort reg;
-    z3::func_decl cons;
-    z3::sort sort;
-    z3::func_decl_vector projs;
-    MemState::Sort mem;
-    
-    enum class Fields {
-        XM_LIST(X_x86_REGS),
-        XM_LIST(X_x86_FLAGS)
-    };
-    
-    Sort(z3::context& ctx);
-    
-    ArchState unpack(const z3::expr& e) const;
-    z3::expr pack(ArchState& arch) const;
-};
-#endif
 
 }

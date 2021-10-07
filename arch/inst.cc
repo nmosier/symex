@@ -1,3 +1,5 @@
+#include <optional>
+
 #include "inst.h"
 #include "util.h"
 #include "operands.h"

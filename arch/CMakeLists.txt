@@ -3,16 +3,19 @@ add_library(arch OBJECT
   )
 
 add_executable(x86-test
-  x86.cc
+  x86.cc x86.h
   x86-test.cc
   ../cores/core.cc
   ../cores/macho.cc
   ../cores/minidump.cc
   ../cores/file.cc
   explore.cc
-  memstate.cc
-  inst.cc
-  operands.cc
-  archstate.cc
-  context.cc
+  memstate.cc memstate.h
+  inst.cc inst.h
+  operands.cc operands.h
+  archstate.cc archstate.h
+  context.cc context.h
+  cfg.cc cfg.h
+  peephole.h
+  program.h
   )

@@ -4,6 +4,7 @@
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <cassert>
+#include <cstring>
 
 namespace cores {
 
@@ -35,7 +36,7 @@ namespace cores {
     }
 
     bool operator<(const File& other) const {
-      return strcmp(path, other.path) < 0;
+      return std::strcmp(path, other.path) < 0;
     }
 
     template <typename T>

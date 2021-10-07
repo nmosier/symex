@@ -22,46 +22,9 @@ namespace x86 {
 
 using addr_t = uint32_t;
 using ByteMap = std::unordered_set<addr_t>;
-
-
-
-
-#if 0
-struct CFG {
-    using Rel = std::unordered_map<addr_t, std::unordered_set<addr_t>>;
-    Rel fwd;
-    Rel rev;
-    
-    void add_edge(addr_t src, addr_t dst) {
-        fwd[src].insert(dst);
-        fwd[dst].insert(src);
-    }
-    
-    CFG(const Program& prog) {
-        add_program(prog);
-    }
-    
-    void add_program(const Program& prog) {
-#if 0
-        for (const auto& p : prog.map) {
-            addr_t src = p.first;
-            const auto *I = p.second.I;
-            std::optional<addr_t> dst;
-            switch (I->id) {
-                case X86_INS_JMP: {
-                    const auto& op = I->detail->x86.operands[0];
-                    if (op.type == X86_OP_IMM) {
-                        
-                    }
-                    
-                default: unimplemented("%s", I->mnemonic);
-                }
-            }
-        }
-#endif
-    }
-};
-#endif
+using AddrSet = std::unordered_set<addr_t>;
+using AddrMap = std::unordered_map<addr_t, AddrSet>;
+using AddrVec = std::vector<addr_t>;
 
 struct MemoryRange {
     uint64_t base;

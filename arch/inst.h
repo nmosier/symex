@@ -16,6 +16,10 @@ struct Inst {
     
     void transfer(ArchState& arch, ReadOut read_out, WriteOut write_out) const;
     
+    bool operator<(const Inst& other) const {
+        return I < other.I;
+    }
+    
     bool has_multiple_exits() const {
         switch (I->id) {
             case X86_INS_JAE:
@@ -77,6 +81,11 @@ private:
     void transfer_shift(ArchState& arch, z3::context& ctx, ReadOut read_out, WriteOut write_out) const;
     void transfer_imul(ArchState& arch, z3::context& ctx, ReadOut read_out, WriteOut write_out) const;
 };
+
+inline std::ostream& operator<<(std::ostream& os, const Inst& x) {
+    os << std::hex << x.I->address << " " << x.I->mnemonic << " " << x.I->op_str;
+    return os;
+}
 
 struct Condition {
     enum Kind {

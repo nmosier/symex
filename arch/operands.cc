@@ -1,3 +1,5 @@
+#include <cmath>
+
 #include "operands.h"
 #include "archstate.h"
 #include "util.h"
@@ -10,7 +12,7 @@ z3::expr MemoryOperand::addr(const ArchState& arch) const {
     mem.base == X86_REG_INVALID ? ctx.bv_val(0, 32) : Register(mem.base).read(arch);
     z3::expr index =
     mem.index == X86_REG_INVALID ? ctx.bv_val(0, 32) : Register(mem.index).read(arch);
-    z3::expr index_scaled = z3::shl(index, (unsigned) log2(mem.scale));
+    z3::expr index_scaled = z3::shl(index, (unsigned) std::log2(mem.scale));
     z3::expr disp = ctx.bv_val(mem.disp, 32);
     z3::expr addr = base + index_scaled + disp;
     return addr;

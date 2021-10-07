@@ -3,6 +3,9 @@
 #include <cstdio>
 #include <cstdlib>
 #include <string>
+#include <vector>
+#include <iostream>
+
 #include <z3++.h>
 
 #define unimplemented(msg, ...)			\
@@ -113,6 +116,17 @@ struct scope {
     ~scope() { solver.pop(); }
 };
 
+inline z3::expr zext_to(const z3::expr& in, const z3::expr& to) {
+    const unsigned to_bits = to.get_sort().bv_size();
+    const unsigned in_bits = in.get_sort().bv_size();
+    assert(in_bits <= to_bits);
+    return zext(in, to_bits - in_bits);
+}
+
+inline z3::expr conditional_store(const z3::expr& arr, const z3::expr& idx, const z3::expr& val, const z3::expr& cond) {
+    return z3::store(arr, idx, z3::ite(cond, val, arr[idx]));
+}
+
 }
 
 
@@ -164,6 +178,19 @@ std::string to_string(const T& x) {
     std::stringstream ss;
     ss << x;
     return ss.str();
+}
+
+template <typename T>
+std::ostream& operator<<(std::ostream& os, const std::vector<T>& a) {
+    os << "[";
+    for (auto it = a.begin(); it != a.end(); ++it) {
+        if (it != a.begin()) {
+            os << ", ";
+        }
+        os << *it;
+    }
+    os << "]";
+    return os;
 }
 
 }

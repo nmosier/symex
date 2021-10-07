@@ -23,6 +23,22 @@ X_x86_REGS(ENT, ENT_), X_x86_FLAGS(ENT, ENT_), mem(ctx) {
 #undef ENT_
 #undef ENT
 
+void ArchState::symbolic() {
+#define ENT32(name, ...) name = ctx().bv_const(#name, 32);
+#define ENT1(name, ...) name = ctx().bv_const(#name, 1);
+    X_x86_REGS(ENT32, ENT32);
+    X_x86_FLAGS(ENT1, ENT1);
+#undef ENT32
+#undef ENT1
+    for (std::size_t i = 0; i < nxmms; ++i) {
+        auto& xmm = xmms.at(i);
+        std::stringstream ss;
+        ss << "xmm" << i;
+        xmm = ctx().bv_const(ss.str().c_str(), xmm_bits);
+    }
+    mem.mem = ctx().constant("tmpmem", ctx().array_sort(ctx().bv_sort(32), ctx().bv_sort(8)));
+}
+
 void ArchState::create(unsigned id, z3::solver& solver) {
 #if 0
     const auto f = [&] (z3::expr& val, unsigned bits, const std::string& s_) {
@@ -49,6 +65,7 @@ void ArchState::create(unsigned id, z3::solver& solver) {
     }
 }
 
+// TODO: this is useless, currently
 z3::expr ArchState::operator==(const ArchState& other) const {
     const z3::expr xmm_cmp = xmms == other.xmms;
 #define ENT_(name, ...) name == other.name
@@ -56,6 +73,18 @@ z3::expr ArchState::operator==(const ArchState& other) const {
     return X_x86_REGS(ENT, ENT_) && X_x86_FLAGS(ENT, ENT_) && xmm_cmp;
 #undef ENT
 #undef ENT_
+}
+
+void ArchState::transform_expr(std::function<z3::expr (const z3::expr&)> f) {
+#define ENT(name, ...) name = f(name);
+    X_x86_REGS(ENT, ENT);
+    X_x86_FLAGS(ENT, ENT);
+#undef ENT
+    for (z3::expr& xmm : xmms) {
+        xmm = f(xmm);
+    }
+    
+    mem.mem = f(mem.mem);
 }
 
 }

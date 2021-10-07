@@ -33,6 +33,10 @@ struct Program {
         return disasm(container.data(), container.size() * sizeof(container.data()[0]), address, count);
     }
     
+    const Inst& at(addr_t addr) const {
+        return map.at(addr);
+    }
+    
     void compute_basic_blocks();
 };
 
@@ -57,6 +61,10 @@ struct CoreProgram {
         }
         
         return &program.map.at(addr);
+    }
+    
+    const Inst& at(addr_t addr) const {
+        return program.at(addr);
     }
 };
 

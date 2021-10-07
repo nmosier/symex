@@ -9,8 +9,10 @@
 namespace x86 {
 
 struct MemState {
-    z3::context& ctx;
+    z3::context *ctx_;
     z3::expr mem;
+    
+    z3::context& ctx() const { return *ctx_; }
     
     struct Access {
         z3::expr addr;
@@ -31,6 +33,17 @@ struct MemState {
         z3::expr operator!=(const Access& other) const {
             return !(*this == other);
         }
+        
+        void transform_expr(std::function<z3::expr (const z3::expr&)> f) {
+            addr = f(addr);
+            data = f(data);
+        }
+        
+        void substitute(const z3::expr_vector& src, const z3::expr_vector& dst) {
+            transform_expr([&src, &dst] (z3::expr e) -> z3::expr {
+                return e.substitute(src, dst);
+            });
+        }
     };
     
     struct Read: Access {
@@ -45,32 +58,6 @@ struct MemState {
         Write eval(const z3::model& model) const { return Write {Access::eval(model)}; }
     };
     
-#if 0
-    struct Sort {
-        z3::func_decl cons;
-        z3::sort sort;
-        z3::func_decl_vector projs;
-        
-        enum class Fields {
-            XM_LIST(X_x86_MEMS)
-        };
-        
-        Sort(z3::context& ctx): cons(ctx), sort(ctx), projs(ctx) {
-            constexpr std::size_t size = 3;
-            const char *names[size] = { XM_STR_LIST(X_x86_MEMS) };
-            const auto memsort = [&] (unsigned bytes) -> z3::sort {
-                return ctx.array_sort(ctx.bv_sort(32), ctx.bv_sort(bytes * 8));
-            };
-            const std::array<z3::sort, size> sorts = {memsort(1), memsort(2), memsort(4)};
-            cons = ctx.tuple_sort("x86_mem", size, names, sorts.data(), projs);
-            sort = cons.range();
-        }
-        
-        MemState unpack(const z3::expr& e) const;
-        z3::expr pack(MemState& mem) const;
-    };
-#endif
-    
     MemState(z3::context& ctx);
 
     template <typename OutputIt>
@@ -78,6 +65,10 @@ struct MemState {
     
     template <typename OutputIt>
     void write(const z3::expr& address, const z3::expr& value, OutputIt write_out);
+    
+    static z3::expr get_init_mem(z3::context& ctx) {
+        return ctx.constant("mem", ctx.array_sort(ctx.bv_sort(32), ctx.bv_sort(8)));
+    }
     
 private:
     z3::expr read_aligned(const z3::expr& addr_hi, const z3::expr& addr_lo, unsigned size) const;
