@@ -21,10 +21,11 @@ add_executable(x86-test
   ../util.h
   )
 
+if(1)
 target_compile_options(x86-test PUBLIC
   -fsanitize=address
   )
 target_link_options(x86-test PUBLIC
   -fsanitize=address
   )
-
+endif()

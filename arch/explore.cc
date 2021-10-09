@@ -77,14 +77,14 @@ void Context::explore_paths_loop(const ArchState& init_arch, z3::solver& solver,
                 }
             }
             
+            trace.push_back(inst->I);
+            
             ArchState out_arch {ctx};
             
             if (loop_out) {
                 std::cerr << "LOOP FOUND\n";
                 out_arch = *loop_out;
             } else {
-                
-                trace.push_back(inst->I);
                 
                 const ArchState& in_arch = entry.out;
                 ArchState arch = in_arch;
