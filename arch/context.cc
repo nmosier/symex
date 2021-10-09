@@ -65,7 +65,7 @@ std::optional<Context::Assignment> Context::explore_paths_find_assigment(const A
     }
 #endif
     
-    return Assignment {.pred = acc, .eip = static_cast<addr_t>(model.eval(out_arch.eip).as_uint64()), .mask = write_mask};
+    return Assignment {.pred = acc, .eip = static_cast<addr_t>(model.eval(out_arch.eip).get_numeral_uint64()), .mask = write_mask};
 #undef recheck
 }
 

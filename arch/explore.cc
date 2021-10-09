@@ -21,7 +21,7 @@ void Context::explore_paths_loop(const ArchState& init_arch, z3::solver& solver,
     solver.push();
     
     unsigned trace_id = 0;
-    trace.push_back(program.disasm(init_arch.eip.as_uint64())->I);
+    trace.push_back(program.disasm(init_arch.eip.get_numeral_uint64())->I);
     
     while (!stack.empty()) {
         
@@ -72,7 +72,7 @@ void Context::explore_paths_loop(const ArchState& init_arch, z3::solver& solver,
                         break;
                     }
 #else
-                    loop.analyze2(entry.out, solver, *this);
+                    loop_out = loop.analyze2(entry.out, solver, *this);
 #endif
                 }
             }

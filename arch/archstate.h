@@ -76,6 +76,8 @@ struct ArchState {
     
     void symbolic();
     
+    static z3::expr substitute(z3::expr& e, const ArchState& src, const ArchState& dst);
+    
     z3::expr operator==(const ArchState& other) const;
 };
 

@@ -39,6 +39,22 @@ void ArchState::symbolic() {
     mem.mem = ctx().constant("tmpmem", ctx().array_sort(ctx().bv_sort(32), ctx().bv_sort(8)));
 }
 
+z3::expr ArchState::substitute(z3::expr& e, const ArchState& src, const ArchState& dst) {
+    z3::context& ctx = e.ctx();
+    z3::expr_vector srcs {ctx}, dsts {ctx};
+    
+#define ENT(name, ...) srcs.push_back(src.name); dsts.push_back(dst.name);
+    X_x86_REGS(ENT, ENT);
+    X_x86_FLAGS(ENT, ENT);
+#undef ENT
+    for (std::size_t i = 0; i < nxmms; ++i) {
+        srcs.push_back(src.xmms[i]);
+        dsts.push_back(dst.xmms[i]);
+    }
+    
+    return e.substitute(srcs, dsts);
+}
+
 void ArchState::create(unsigned id, z3::solver& solver) {
 #if 0
     const auto f = [&] (z3::expr& val, unsigned bits, const std::string& s_) {

@@ -20,6 +20,7 @@ add_subdirectory(arch)
 
 add_executable(symex
   symex.cc
+  util.h
   $<TARGET_OBJECTS:arch>
   )
 target_compile_options(cores PRIVATE -m32)

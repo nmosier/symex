@@ -50,7 +50,7 @@ struct CFG::Loop {
     
     std::optional<ArchState> analyze(const ArchState& in, z3::solver& solver, std::vector<MemState::Read>& read_out, std::vector<MemState::Write>& write_out);
     
-    void analyze2(const ArchState& in, z3::solver& solver, const Context& context);
+    std::optional<ArchState> analyze2(const ArchState& in, z3::solver& solver, const Context& context);
     
     uint64_t entry_addr() const {
         return body.front().I->address;

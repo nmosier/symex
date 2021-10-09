@@ -18,4 +18,13 @@ add_executable(x86-test
   cfg.cc cfg.h
   peephole.h
   program.h
+  ../util.h
   )
+
+target_compile_options(x86-test PUBLIC
+  -fsanitize=address
+  )
+target_link_options(x86-test PUBLIC
+  -fsanitize=address
+  )
+

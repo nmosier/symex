@@ -105,9 +105,9 @@ inline expr concat(InputIt begin, InputIt end) {
 }
 
 struct eval {
-    const z3::model& model;
+    z3::model model;
     eval(const z3::model& model): model(model) {}
-    z3::expr operator()(const z3::expr& e) const { return model.eval(e); }
+    z3::expr operator()(const z3::expr& e) const { return model.eval(e, true); }
 };
 
 struct scope {
@@ -125,6 +125,14 @@ inline z3::expr zext_to(const z3::expr& in, const z3::expr& to) {
 
 inline z3::expr conditional_store(const z3::expr& arr, const z3::expr& idx, const z3::expr& val, const z3::expr& cond) {
     return z3::store(arr, idx, z3::ite(cond, val, arr[idx]));
+}
+
+inline expr substitute(expr& e, const expr& src, const expr& dst) {
+    z3::context& ctx = e.ctx();
+    expr_vector srcs {ctx}, dsts {ctx};
+    srcs.push_back(src);
+    dsts.push_back(dst);
+    return e.substitute(srcs, dsts);
 }
 
 }
