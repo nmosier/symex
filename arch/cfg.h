@@ -48,13 +48,13 @@ struct CFG::Loop {
     
     void transfer(ArchState& arch, ReadOut read_out, WriteOut write_out) const;
     
-    std::optional<ArchState> analyze(const ArchState& in, z3::solver& solver, std::vector<MemState::Read>& read_out, std::vector<MemState::Write>& write_out);
-    
-    std::optional<ArchState> analyze2(const ArchState& in, z3::solver& solver, const Context& context);
+    std::optional<ArchState> analyze(const ArchState& in, z3::solver& solver, const Context& context);
     
     uint64_t entry_addr() const {
         return body.front().I->address;
     }
+    
+    struct Analysis;
     
 private:
     using ReadVec = std::vector<MemState::Read>;
@@ -77,13 +77,9 @@ private:
     z3::expr constant(const std::string& s, const z3::sort& sort) const {
         return sort.ctx().constant(name(s).c_str(), sort);
     }
+    
 };
 
-struct CFG::Loop::Step {
-    ArchState in, out;
-    ReadVec reads;
-    WriteVec writes;
-};
 
 struct CFG::Loop::Iteration {
     std::vector<ArchState> archs; // n+1
@@ -123,6 +119,53 @@ struct CFG::Loop::Iteration {
     
     Iteration() {}
     Iteration(const ArchState& in) { archs.push_back(in); }
+};
+
+
+struct CFG::Loop::Analysis {
+    /* inputs */
+    const Loop& loop;
+    const ArchState& in;
+    z3::solver& solver;
+    const Context& context;
+    
+    /* outputs */
+    std::vector<Iteration> iters;
+    std::unordered_set<addr_t> read_set;
+    ArchState out_param;
+
+    std::optional<ArchState> analyze();
+    
+    Analysis(const Loop& loop, const ArchState& in, z3::solver& solver, const Context& context): loop(loop), in(in), solver(solver), context(context), out_param(in.ctx()), idx(ctx()), sym_in(ctx()), sym_out_param(ctx()) {
+        sym_in.symbolic();
+        idx = ctx().bv_const("idx", 32);
+    }
+    
+private:
+    z3::context& ctx() const { return in.ctx(); }
+    void set_iters_1(); // sets `iters`, `read_set`.
+    void check_aliases_2();
+    void find_access_strides_3();
+    void set_out_param_4();
+    
+    z3::expr idx;
+    ArchState sym_in, sym_out_param;
+    const ArchState& sym_out() const {
+        return sym_iter().archs.back();
+    }
+    std::vector<Iteration> sym_iters;
+    const Iteration& sym_iter() const {
+        return sym_iters.front();
+    }
+    std::vector<z3::expr ArchState::*> seq_regs, comb_regs;
+    void check_sequential_reg(z3::expr ArchState::*reg);
+    void check_combinatorial_reg(z3::expr ArchState::*reg);
+    
+    struct exception {
+        std::string reason;
+        exception(const std::string& reason): reason(reason) {}
+    };
+    
 };
 
 template <typename OutputIt>
