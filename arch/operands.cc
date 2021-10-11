@@ -89,14 +89,14 @@ z3::expr Register::read(const ArchState& arch) const {
         case X86_REG_BL: return arch.ebx.extract(7, 0);
         case X86_REG_CL: return arch.ecx.extract(7, 0);
             
-        case X86_REG_XMM0: return arch.xmms[0];
-        case X86_REG_XMM1: return arch.xmms[1];
-        case X86_REG_XMM2: return arch.xmms[2];
-        case X86_REG_XMM3: return arch.xmms[3];
-        case X86_REG_XMM4: return arch.xmms[4];
-        case X86_REG_XMM5: return arch.xmms[5];
-        case X86_REG_XMM6: return arch.xmms[6];
-        case X86_REG_XMM7: return arch.xmms[7];
+        case X86_REG_XMM0: return arch.xmm0;
+        case X86_REG_XMM1: return arch.xmm1;
+        case X86_REG_XMM2: return arch.xmm2;
+        case X86_REG_XMM3: return arch.xmm3;
+        case X86_REG_XMM4: return arch.xmm4;
+        case X86_REG_XMM5: return arch.xmm5;
+        case X86_REG_XMM6: return arch.xmm6;
+        case X86_REG_XMM7: return arch.xmm7;
             
         default:
             unimplemented("reg %s", cs_reg_name(g_handle, reg));
@@ -116,14 +116,14 @@ void Register::write(ArchState& arch, const z3::expr& e) const {
         case X86_REG_EBP: arch.ebp = e; break;
         case X86_REG_ESP: arch.esp = e; break;
             
-        case X86_REG_XMM0: arch.xmms[0] = e; break;
-        case X86_REG_XMM1: arch.xmms[1] = e; break;
-        case X86_REG_XMM2: arch.xmms[2] = e; break;
-        case X86_REG_XMM3: arch.xmms[3] = e; break;
-        case X86_REG_XMM4: arch.xmms[4] = e; break;
-        case X86_REG_XMM5: arch.xmms[5] = e; break;
-        case X86_REG_XMM6: arch.xmms[6] = e; break;
-        case X86_REG_XMM7: arch.xmms[7] = e; break;
+        case X86_REG_XMM0: arch.xmm0 = e; break;
+        case X86_REG_XMM1: arch.xmm1 = e; break;
+        case X86_REG_XMM2: arch.xmm2 = e; break;
+        case X86_REG_XMM3: arch.xmm3 = e; break;
+        case X86_REG_XMM4: arch.xmm4 = e; break;
+        case X86_REG_XMM5: arch.xmm5 = e; break;
+        case X86_REG_XMM6: arch.xmm6 = e; break;
+        case X86_REG_XMM7: arch.xmm7 = e; break;
             
         case X86_REG_AL: arch.eax = z3::bv_store(arch.eax, e, 0); break;
         case X86_REG_BL: arch.ebx = z3::bv_store(arch.ebx, e, 0); break;

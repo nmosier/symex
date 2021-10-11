@@ -4,7 +4,7 @@
 namespace x86 {
 
 uint64_t MemState::Read::operator()(const cores::Core& core) const {
-    const uint64_t addr = this->addr.as_uint64();
+    const uint64_t addr = this->addr.get_numeral_uint64();
     switch (this->data.get_sort().bv_size() / 8) {
         case 1: return core.read<uint8_t>(addr);
         case 2: return core.read<uint16_t>(addr);
@@ -14,7 +14,7 @@ uint64_t MemState::Read::operator()(const cores::Core& core) const {
 }
 
 z3::expr MemState::Read::operator()(const cores::Core& core, const ByteMap& write_mask) const {
-    uint64_t addr = this->addr.as_uint64();
+    uint64_t addr = this->addr.get_numeral_uint64();
     z3::expr data = this->data;
     std::vector<z3::expr> res;
     for (unsigned i = 0; i < size(); ++i) {

@@ -157,7 +157,8 @@ private:
     const Iteration& sym_iter() const {
         return sym_iters.front();
     }
-    std::vector<z3::expr ArchState::*> seq_regs, comb_regs;
+    std::vector<z3::expr ArchState::*> seq_regs, comb_regs, const_regs;
+    bool check_constant_reg(z3::expr ArchState::*reg);
     void check_sequential_reg(z3::expr ArchState::*reg);
     void check_combinatorial_reg(z3::expr ArchState::*reg);
     

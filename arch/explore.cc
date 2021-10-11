@@ -177,12 +177,14 @@ void Context::explore_paths() {
     
     std::cerr << "eip = " << std::hex << state.__eip << "\n";
     
-#define ENT(name) in_arch.name = ctx.bv_val(state.__##name, 32);
+#define ENT(name, bits) in_arch.name = ctx.bv_val(state.__##name, 32);
     X_x86_REGS(ENT, ENT);
 #undef ENT
-#define ENT(name, bit) in_arch.name = ctx.bv_val((state.__eflags >> bit) & 1, 1);
+#define ENT(name, bits, bit) in_arch.name = ctx.bv_val((state.__eflags >> bit) & 1, 1);
     X_x86_FLAGS(ENT, ENT);
 #undef ENT
+    
+    // TODO: restore xmms too
     
     ByteMap write_mask;
     for (const auto& range : symbolic_ranges) {
@@ -194,7 +196,7 @@ void Context::explore_paths() {
     // set return address
     in_arch.mem.write(in_arch.esp, ctx.bv_val(0x42424242, 32), util::null_output_iterator());
     for (uint64_t i = 0; i < 4; ++i) {
-        write_mask.insert(in_arch.esp.as_uint64() + i);
+        write_mask.insert(in_arch.esp.get_numeral_uint64() + i);
     }
     
     auto e = in_arch.mem.read(in_arch.esp, 4, util::null_output_iterator());

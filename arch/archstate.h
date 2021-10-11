@@ -5,38 +5,45 @@
 namespace x86 {
 
 #define X_x86_REGS(XB, XE)            \
-XB(eax)                    \
-XB(ebx)                    \
-XB(ecx)                    \
-XB(edx)                    \
-XB(edi)                    \
-XB(esi)                    \
-XB(ebp)                    \
-XB(esp)                    \
-XE(eip)
-
+XB(eax, 32)                    \
+XB(ebx, 32)                    \
+XB(ecx, 32)                    \
+XB(edx, 32)                    \
+XB(edi, 32)                    \
+XB(esi, 32)                    \
+XB(ebp, 32)                    \
+XB(esp, 32)                    \
+XE(eip, 32)
 
 #define X_x86_FLAGS(XB, XE)            \
-XB(cf, 0)                    \
-XB(zf, 6)                    \
-XB(sf, 7) \
-XE(of, 11)
+XB(cf, 1, 0)                    \
+XB(zf, 1, 6)                    \
+XB(sf, 1, 7) \
+XE(of, 1, 11)
 
-#define X_x86_MEMS(XB, XE)            \
-XB(mem1)                        \
-XB(mem2)                        \
-XB(mem4)
+#define X_x86_XMMS(XB, XE) \
+XB(xmm0, 128) \
+XB(xmm1, 128) \
+XB(xmm2, 128) \
+XB(xmm3, 128) \
+XB(xmm4, 128) \
+XB(xmm5, 128) \
+XB(xmm6, 128) \
+XE(xmm7, 128)
+
+#define X_x86_ALL(XB, XE) \
+X_x86_REGS(XB, XB) \
+X_x86_FLAGS(XB, XB) \
+X_x86_XMMS(XB, XE)
 
 struct ArchState {
-#define ENT_(name, ...) z3::expr name
-#define ENT(name, ...) ENT_(name);
-    X_x86_REGS(ENT, ENT_);
-    X_x86_FLAGS(ENT, ENT_);
-#undef ENT_
+#define ENT(name, ...) z3::expr name;
+#define ENT_(...) ENT(__VA_ARGS__);
+    X_x86_ALL(ENT, ENT_);
 #undef ENT
+#undef ENT_
     static constexpr std::size_t nxmms = 8;
     static constexpr unsigned xmm_bits = 128;
-    std::vector<z3::expr> xmms;
     
     MemState mem;
     
@@ -47,19 +54,9 @@ struct ArchState {
     z3::context& ctx() const { return eax.ctx(); }
     
     void zero() {
-#define ENT_(name) name = ctx().bv_val(0, 32)
-#define ENT(name) ENT_(name);
-        X_x86_REGS(ENT, ENT_);
-#undef ENT_
+#define ENT(name, bits, ...) name = ctx().bv_val(0, bits);
+        X_x86_ALL(ENT, ENT);
 #undef ENT
-#define ENT_(name, ...) name = ctx().bv_val(0, 1)
-#define ENT(name, ...) ENT_(name);
-        X_x86_FLAGS(ENT, ENT_);
-#undef ENT_
-#undef ENT
-        for (z3::expr& xmm : xmms) {
-            xmm = ctx().bv_val(0, xmm_bits);
-        }
     }
     
     void transform_expr(std::function<z3::expr (const z3::expr&)> f);
@@ -79,6 +76,41 @@ struct ArchState {
     static z3::expr substitute(z3::expr& e, const ArchState& src, const ArchState& dst);
     
     z3::expr operator==(const ArchState& other) const;
+    
+    enum RegClass {
+        REG  = 1 << 0,
+        FLAG = 1 << 1,
+        XMM  = 1 << 2,
+        ALL  = REG | FLAG | XMM
+    };
+    
+    static void for_each(int kind, std::function<void (z3::expr ArchState::*)> f) {
+#define ENT(name, ...) f(&ArchState::name);
+        if ((kind & REG)) {
+            X_x86_REGS(ENT, ENT);
+        }
+        if ((kind & FLAG)) {
+            X_x86_FLAGS(ENT, ENT);
+        }
+        if ((kind & XMM)) {
+            X_x86_XMMS(ENT, ENT);
+        }
+#undef ENT
+    }
+    
+    static void for_each_reg(std::function<void (z3::expr ArchState::*)> f) {
+        for_each(REG, f);
+    }
+    static void for_each_flag(std::function<void (z3::expr ArchState::*)> f) {
+        for_each(FLAG, f);
+    }
+    static void for_each_xmm(std::function<void (z3::expr ArchState::*)> f) {
+        for_each(XMM, f);
+    }
+    static void for_each(std::function<void (z3::expr ArchState::*)> f) {
+        for_each(ALL, f);
+    }
+
 };
 
 std::ostream& operator<<(std::ostream& os, const ArchState& arch);

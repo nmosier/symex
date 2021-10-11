@@ -45,7 +45,7 @@ std::optional<Context::Assignment> Context::explore_paths_find_assigment(const A
         Write con_write = sym_write.eval(model);
         add(sym_write.addr == con_write.addr);
         for (unsigned i = 0; i < con_write.size(); ++i) {
-            write_mask.insert(con_write.addr.as_uint64() + i);
+            write_mask.insert(con_write.addr.get_numeral_uint64() + i);
         }
     }
     
@@ -91,7 +91,7 @@ void Context::explore_paths_rec_dst(Program& program, const ArchState& in_arch, 
         solver.push();
         {
             solver.add(eip == out_arch.eip);
-            explore_paths_rec(program, out_arch, solver, eip.as_uint64(), write_mask);
+            explore_paths_rec(program, out_arch, solver, eip.get_numeral_uint64(), write_mask);
         }
         solver.pop();
         solver.add(eip != out_arch.eip);
@@ -187,7 +187,7 @@ void Context::explore_paths_rec_write(Program& program, const ArchState& in_arch
             solver.add(con_write.addr == sym_write.addr);
             ByteMap new_write_mask = write_mask;
             for (std::size_t i = 0; i < sym_write.size(); ++i) {
-                new_write_mask.insert(con_write.addr.as_uint64() + i);
+                new_write_mask.insert(con_write.addr.get_numeral_uint64() + i);
             }
             explore_paths_rec_write(program, in_arch, out_arch, solver, new_write_mask, writes, std::next(write_it));
         }
@@ -205,7 +205,7 @@ void Context::check_accesses(const ReadVec& reads, const WriteVec& writes, z3::s
         z3::scope scope {solver};
         solver.add(read.addr != model.eval(read.addr));
         if (solver.check() == z3::sat) {
-            report("read at %p has multiple source addresses", (void *) model.eval(read.addr).as_uint64());
+            report("read at %p has multiple source addresses", (void *) model.eval(read.addr).get_numeral_uint64());
         }
     }
     
@@ -215,7 +215,7 @@ void Context::check_accesses(const ReadVec& reads, const WriteVec& writes, z3::s
         z3::scope scope {solver};
         solver.add(write.addr != model.eval(write.addr));
         if (solver.check() == z3::sat) {
-            report("write at %p has multiple destination addresses", (void *) model.eval(write.addr).as_uint64());
+            report("write at %p has multiple destination addresses", (void *) model.eval(write.addr).get_numeral_uint64());
         }
     }
 }
