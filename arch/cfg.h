@@ -148,6 +148,9 @@ private:
     void find_access_strides_3();
     void set_out_param_4();
     
+    /* test_reg is concrete except for idx. */
+    bool check_arch_state_reg(z3::expr ArchState::*reg, const z3::expr& test_reg);
+    
     z3::expr idx;
     ArchState sym_in, sym_out_param;
     const ArchState& sym_out() const {
@@ -159,7 +162,7 @@ private:
     }
     std::vector<z3::expr ArchState::*> seq_regs, comb_regs, const_regs;
     bool check_constant_reg(z3::expr ArchState::*reg);
-    void check_sequential_reg(z3::expr ArchState::*reg);
+    bool check_sequential_reg(z3::expr ArchState::*reg);
     void check_combinatorial_reg(z3::expr ArchState::*reg);
     
     struct exception {

@@ -171,6 +171,10 @@ void CFG::Loop::Analysis::set_iters_1() {
     
     std::cerr << "LOOP ANALYSIS: max iterations: " << iters.size() << "\n";
     
+    if (iters.size() <= 2) {
+        throw exception("cannot execute minimum iterations");
+    }
+    
     // apply read set
     context.apply_read_set(solver, read_set.begin(), read_set.end());
 }
@@ -279,7 +283,7 @@ bool CFG::Loop::Analysis::check_constant_reg(z3::expr ArchState::*reg) {
     }
 }
 
-void CFG::Loop::Analysis::check_sequential_reg(z3::expr ArchState::*reg) {
+bool CFG::Loop::Analysis::check_sequential_reg(z3::expr ArchState::*reg) {
     const z3::expr& sym_in_reg = sym_in.*reg;
     const z3::expr& sym_out_reg = sym_out().*reg;
     const z3::expr& in_reg = in.*reg;
@@ -298,9 +302,9 @@ void CFG::Loop::Analysis::check_sequential_reg(z3::expr ArchState::*reg) {
         sym_out_param.*reg = sym_in.*reg + con_scalar * (idx + 1);
         seq_regs.push_back(reg);
         std::cerr << "sequential register " << sym_in.*reg << ": " << sym_out_param.*reg << "\n";
+        return true;
     } else {
-        std::cerr << "combinatorial register " << sym_in.*reg << "\n";
-        comb_regs.push_back(reg);
+        return false;
     }
 }
 
@@ -321,9 +325,47 @@ void CFG::Loop::Analysis::check_combinatorial_reg(z3::expr ArchState::*reg) {
     }
     
     // do symbolic replacement
+    // TODO: also substitute mem in archstate? or add substitute all to MemState
     z3::expr con_acc = ArchState::substitute(acc, sym_in, in);
     con_acc = z3::substitute(con_acc, sym_in.mem.mem, in.mem.mem);
     
+#if 1
+    {
+        while (true) {
+            // find a binding of offset
+            for (std::size_t i = 0; i < iters.size(); ++i) {
+                std::cerr << "\r" << i << "/" << iters.size();
+                const Iteration& iter = iters.at(i);
+                z3::expr con_acc_iter = z3::substitute(con_acc, idx, ctx().bv_val((uint64_t) i, 32));
+                solver.add(con_acc_iter == iter.archs.back().*reg);
+                if (solver.check() != z3::sat) {
+                    throw exception("failed to find combinatorial offsets");
+                }
+            }
+            std::cerr << "\n";
+            
+            assert(solver.check() == z3::sat);
+            
+            
+            z3::expr_vector srcs {ctx()}, dsts {ctx()};
+            const z3::eval eval {solver.get_model()};
+            z3::expr binding = ctx().bool_val(true);
+            for (const z3::expr& offset : offsets) {
+                srcs.push_back(offset);
+                dsts.push_back(eval(offset));
+                binding = binding && offset == eval(offset);
+            }
+            
+            // check whether binding works
+            if (check_arch_state_reg(reg, con_acc.substitute(srcs, dsts))) {
+                break;
+            }
+            solver.add(!binding);
+        }
+    }
+#endif
+    
+#if 0
     for (std::size_t i = 0; i < iters.size(); ++i) {
         z3::expr con_acc_iter = z3::substitute(con_acc, idx, ctx().bv_val((uint64_t) i, 32));
         solver.add(con_acc_iter == iters.at(i).archs.back().*reg, std::to_string(i).c_str());
@@ -336,6 +378,7 @@ void CFG::Loop::Analysis::check_combinatorial_reg(z3::expr ArchState::*reg) {
         ss << "register " << sym_in.*reg << " not combinatorial";
         throw exception(ss.str());
     }
+#endif
 
     // substitute in replacements
     z3::eval eval {solver.get_model()};
@@ -343,6 +386,24 @@ void CFG::Loop::Analysis::check_combinatorial_reg(z3::expr ArchState::*reg) {
         acc = z3::substitute(acc, offset, eval(offset));
     }
     sym_out_param.*reg = acc;
+}
+
+
+bool CFG::Loop::Analysis::check_arch_state_reg(z3::expr ArchState::*reg, const z3::expr& test_reg) {
+    for (std::size_t i = 0; i < iters.size(); ++i) {
+        z3::scope scope {solver};
+        const Iteration& iter = iters.at(i);
+        z3::expr test_reg_con = test_reg;
+        test_reg_con = z3::substitute(test_reg_con, idx, ctx().bv_val((uint64_t) i, 32));
+        
+        solver.add(iter.archs.back().*reg != test_reg_con);
+        
+        if (solver.check() == z3::unsat) {
+            return true;
+        }
+    }
+    
+    return false;
 }
 
 void CFG::Loop::Analysis::set_out_param_4() {
@@ -363,11 +424,19 @@ void CFG::Loop::Analysis::set_out_param_4() {
     sym_out_param = sym_out;
     
     // TODO: make check_* function interface more intuitive
-    ArchState::for_each([&] (const auto reg) {
-        if (check_constant_reg(reg)) { return; }
-        check_sequential_reg(reg);
+    ArchState::for_each(ArchState::REG, [&] (const auto reg) {
+        if (!check_constant_reg(reg)) {
+            if (!check_sequential_reg(reg)) {
+                comb_regs.push_back(reg);
+            }
+        }
     });
-        
+    ArchState::for_each(ArchState::FLAG | ArchState::XMM, [&] (const auto reg) {
+        if (!check_constant_reg(reg)) {
+            comb_regs.push_back(reg);
+        }
+    });
+    
     for (const auto comb_reg : comb_regs) {
         check_combinatorial_reg(comb_reg);
     }
