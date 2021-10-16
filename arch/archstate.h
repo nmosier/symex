@@ -110,7 +110,41 @@ struct ArchState {
     static void for_each(std::function<void (z3::expr ArchState::*)> f) {
         for_each(ALL, f);
     }
-
+    
+#define ENT(...) 1 +
+#define ENT_(...) 1
+    static inline constexpr unsigned num_regs = X_x86_REGS(ENT, ENT_);
+    static inline constexpr unsigned num_flags = X_x86_FLAGS(ENT, ENT_);
+    static inline constexpr unsigned num_xmms = X_x86_XMMS(ENT, ENT_);
+#undef ENT_
+#undef ENT
+    
+    template <typename InputIt>
+    void get_regs(InputIt begin, InputIt end, z3::expr_vector& v) const {
+        for (auto it = begin; it != end; ++it) {
+            v.push_back(this->**it);
+        }
+    }
+    
+    template <typename Container>
+    void get_regs(const Container& reg_ptrs, z3::expr_vector& v) const {
+        get_regs(std::begin(reg_ptrs), std::end(reg_ptrs), v);
+    }
+    
+    template <typename InputIt>
+    z3::expr_vector get_regs(InputIt begin, InputIt end) const {
+        z3::expr_vector v {ctx()};
+        get_regs(begin, end, v);
+        return v;
+    }
+    
+    template <typename Container>
+    z3::expr_vector get_regs(const Container& reg_ptrs) {
+        return get_regs(std::begin(reg_ptrs), std::end(reg_ptrs));
+    }
+    
+    
+    
 };
 
 std::ostream& operator<<(std::ostream& os, const ArchState& arch);

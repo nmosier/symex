@@ -534,15 +534,16 @@ void Inst::transfer_cmovcc(ArchState& arch, z3::context& ctx, ReadOut read_out, 
 }
 
 void Inst::transfer_string(ArchState& arch, z3::context& ctx, ReadOut read_out, WriteOut write_out) const {
+    const z3::expr four = ctx.bv_val(4, 32);
     switch (I->id) {
         case X86_INS_STOSD:
             arch.mem.write(arch.edi, arch.eax, write_out);
-            arch.edi += 4;
+            arch.edi = arch.edi + four;
             break;
         case X86_INS_MOVSB:
             arch.mem.write(arch.edi, arch.mem.read(arch.esi, 4, read_out), write_out);
-            arch.esi += 4;
-            arch.edi += 4;
+            arch.esi = arch.esi + four;
+            arch.edi = arch.edi + four;
             break;
         default:
             unimplemented("string %s", I->mnemonic);
@@ -553,7 +554,7 @@ void Inst::transfer_string_rep(ArchState& arch, z3::context& ctx, ReadOut read_o
     switch (x86->prefix[0]) {
         case X86_PREFIX_REP:
             transfer_string(arch, ctx, read_out, write_out);
-            arch.ecx -= 1;
+            arch.ecx = arch.ecx - ctx.bv_val(1, 32);
             arch.eip = z3::ite(arch.ecx == 0, arch.eip + I->size, arch.eip);
             break;
         default: unimplemented("prefix %02hhx", x86->prefix[0]);

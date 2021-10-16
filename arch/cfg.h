@@ -136,7 +136,7 @@ struct CFG::Loop::Analysis {
 
     std::optional<ArchState> analyze();
     
-    Analysis(const Loop& loop, const ArchState& in, z3::solver& solver, const Context& context): loop(loop), in(in), solver(solver), context(context), out_param(in.ctx()), idx(ctx()), sym_in(ctx()), sym_out_param(ctx()) {
+    Analysis(const Loop& loop, const ArchState& in, z3::solver& solver, const Context& context): loop(loop), in(in), solver(solver), context(context), out_param(in.ctx()), idx(ctx()), num_iters(ctx()), sym_in(ctx()), sym_out_param(ctx()) {
         sym_in.symbolic();
         idx = ctx().bv_const("idx", 32);
     }
@@ -147,11 +147,12 @@ private:
     void check_aliases_2();
     void find_access_strides_3();
     void set_out_param_4();
+    bool compute_niters_5();
     
     /* test_reg is concrete except for idx. */
     bool check_arch_state_reg(z3::expr ArchState::*reg, const z3::expr& test_reg);
     
-    z3::expr idx;
+    z3::expr idx, num_iters;
     ArchState sym_in, sym_out_param;
     const ArchState& sym_out() const {
         return sym_iter().archs.back();
@@ -164,6 +165,8 @@ private:
     bool check_constant_reg(z3::expr ArchState::*reg);
     bool check_sequential_reg(z3::expr ArchState::*reg);
     void check_combinatorial_reg(z3::expr ArchState::*reg);
+    
+    z3::expr build_niters_expr(const ArchState& in, z3::expr_vector& variables);
     
     struct exception {
         std::string reason;

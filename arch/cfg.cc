@@ -284,28 +284,40 @@ bool CFG::Loop::Analysis::check_constant_reg(z3::expr ArchState::*reg) {
 }
 
 bool CFG::Loop::Analysis::check_sequential_reg(z3::expr ArchState::*reg) {
+    z3::scope scope {solver};
     const z3::expr& sym_in_reg = sym_in.*reg;
     const z3::expr& sym_out_reg = sym_out().*reg;
     const z3::expr& in_reg = in.*reg;
     const unsigned bits = in_reg.get_sort().bv_size();
-    
-    z3::scope scope {solver};
     const z3::expr scalar = ctx().bv_const("scalar", bits);
+    
+    z3::expr match = ctx().bool_val(true);
     for (std::size_t i = 0; i < iters.size(); ++i) {
         const Iteration& iter = iters.at(i);
         const z3::expr& out_reg = iter.archs.back().*reg;
         const z3::expr idx = ctx().bv_val(static_cast<uint64_t>(i), bits);
-        solver.add(out_reg == in_reg + scalar * (idx + 1));
+        match = match && (out_reg == in_reg + scalar * (idx + 1));
     }
-    if (solver.check() == z3::sat) {
-        const z3::expr con_scalar = z3::eval(solver.get_model())(scalar);
-        sym_out_param.*reg = sym_in.*reg + con_scalar * (idx + 1);
-        seq_regs.push_back(reg);
-        std::cerr << "sequential register " << sym_in.*reg << ": " << sym_out_param.*reg << "\n";
-        return true;
-    } else {
-        return false;
+    
+    // TODO: this pattern appears multiple times, maybe extract?
+    z3::expr_vector exists_match {ctx()};
+    exists_match.push_back(match);
+
+    for (unsigned i = 0; i < 1 && solver.check(exists_match) == z3::sat; ++i) {
+        const z3::eval eval {solver.get_model()};
+        const z3::expr con_scalar = eval(scalar);
+        std::cerr << __FUNCTION__ << ": " << sym_in.*reg << ": con_scalar == " << con_scalar << "\n";
+        z3::expr_vector not_all_match {ctx()};
+        not_all_match.push_back(scalar == con_scalar && !match);
+        if (solver.check(not_all_match) == z3::unsat) {
+            sym_out_param.*reg = sym_in.*reg + con_scalar * (idx + 1);
+            seq_regs.push_back(reg);
+            return true;
+        }
+        solver.add(scalar != con_scalar);
     }
+    
+    return false;
 }
 
 void CFG::Loop::Analysis::check_combinatorial_reg(z3::expr ArchState::*reg) {
@@ -315,6 +327,7 @@ void CFG::Loop::Analysis::check_combinatorial_reg(z3::expr ArchState::*reg) {
     
     z3::expr acc = sym_out().*reg;
     std::vector<z3::expr> offsets;
+    assert(seq_regs.size() > 0);
     for (const auto seq_reg : seq_regs) {
         z3::expr seq_reg_out = sym_out_param.*seq_reg;
         const z3::expr offset = z3::sext(ctx().bv_const((std::string("offset") + std::to_string(offsets.size())).c_str(), 1), 31);
@@ -357,6 +370,8 @@ void CFG::Loop::Analysis::check_combinatorial_reg(z3::expr ArchState::*reg) {
             }
             
             // check whether binding works
+            std::cerr << __FUNCTION__ << ": testing offsets " << binding << "\n";
+            
             if (check_arch_state_reg(reg, con_acc.substitute(srcs, dsts))) {
                 break;
             }
@@ -398,12 +413,12 @@ bool CFG::Loop::Analysis::check_arch_state_reg(z3::expr ArchState::*reg, const z
         
         solver.add(iter.archs.back().*reg != test_reg_con);
         
-        if (solver.check() == z3::unsat) {
-            return true;
+        if (solver.check() != z3::unsat) {
+            return false;
         }
     }
     
-    return false;
+    return true;
 }
 
 void CFG::Loop::Analysis::set_out_param_4() {
@@ -436,6 +451,11 @@ void CFG::Loop::Analysis::set_out_param_4() {
             comb_regs.push_back(reg);
         }
     });
+
+    std::cerr << "LOOP ANALYSIS: constant & sequentials:\n";
+#define ENT(name, ...) std::cerr << #name << ": " << sym_out_param.name << "\n";
+    X_x86_ALL(ENT, ENT);
+#undef ENT
     
     for (const auto comb_reg : comb_regs) {
         check_combinatorial_reg(comb_reg);
@@ -486,7 +506,7 @@ void CFG::Loop::Analysis::set_out_param_4() {
     
     // create iteration count
     static unsigned junk = 0;
-    const z3::expr num_iters = ctx().bv_const((std::string("num_iters") + std::to_string(junk++)).c_str(), 32);
+    num_iters = ctx().bv_const((std::string("num_iters") + std::to_string(junk++)).c_str(), 32);
     const z3::expr max_iters = ctx().bv_val((uint64_t) iters.size(), 32);
     {
         z3::expr_vector src {ctx()}, dst {ctx()};
@@ -515,6 +535,66 @@ void CFG::Loop::Analysis::set_out_param_4() {
     }
 }
 
+bool CFG::Loop::Analysis::compute_niters_5() {
+    const z3::scope scope {solver};
+    
+    // check whether there are multiple iteration values
+    std::vector<z3::expr> possible_niters;
+    z3::enumerate(solver, num_iters, std::back_inserter(possible_niters));
+    std::cerr << __FUNCTION__ << ": possible niters: " << possible_niters.size() << "\n";
+    
+    if (possible_niters.size() == 1) {
+        // this loop repeats a constant number of times
+        std::cerr << "LOOP ANALYSIS: constant number of iterations: " << possible_niters.front() << "\n";
+        out_param.substitute(z3::make_expr_vector(ctx(), num_iters),
+                             z3::make_expr_vector(ctx(), possible_niters.front()));
+        return true;
+    }
+    
+    
+    /* try to get concise expression for number of iterations
+     * Approach: use linear combination of input parameters.
+     * NOTE: this will fail for most loops, but is a good start
+     */
+    z3::expr_vector variables {ctx()};
+    z3::expr niters_expr = build_niters_expr(sym_in, variables);
+    std::cerr << "niters_expr: " << niters_expr << "\n";
+    std::cerr << "variables: " << variables << "\n";
+    
+    z3::expr_vector preds {ctx()};
+    for (unsigned i = 0; i < iters.size(); ++i) {
+        const Iteration& iter = iters.at(i);
+        const ArchState& in = iter.archs.front();
+        const z3::expr niters_expr_i = ArchState::substitute(niters_expr, sym_in, in);
+        const z3::expr pred = niters_expr_i + ctx().bv_val(i, 32) == num_iters;
+        preds.push_back(pred);
+    }
+    
+    z3::expr_vector variables_con {ctx()};
+    if (!z3::satisfying_assignment(solver, z3::reduce_and(preds), variables, variables_con)) {
+        std::cerr << "LOOP ANALYSIS: " << __FUNCTION__ << ": couldn't find niters expression\n";
+        return false;
+    }
+    
+    // const z3::expr linear_combo_con = linear_combo.substitute(scalars, scalars_con);
+    std::cerr << "LOOP ANALYSIS: " << __FUNCTION__ << ": found niters expression: " << niters_expr.substitute(variables, variables_con) << "\n";
+}
+
+z3::expr CFG::Loop::Analysis::build_niters_expr(const ArchState& in, z3::expr_vector& variables) {
+    const z3::expr constant = ctx().bv_const("constant", 32);
+    variables.push_back(constant);
+    
+    z3::expr linear_combo = constant;
+    for (unsigned i = 0; i < seq_regs.size(); ++i) {
+        const auto seq_reg = seq_regs.at(i);
+        const z3::expr scalar = ctx().bv_const(util::to_string("scalar", i).c_str(), 32);
+        variables.push_back(scalar);
+        linear_combo = linear_combo + in.*seq_reg * scalar;
+    }
+    
+    return linear_combo;
+}
+
 std::optional<ArchState> CFG::Loop::Analysis::analyze() {
     try {
         /* require only one exit for now */
@@ -526,6 +606,8 @@ std::optional<ArchState> CFG::Loop::Analysis::analyze() {
         check_aliases_2();
         find_access_strides_3();
         set_out_param_4();
+        compute_niters_5();
+        
         return out_param;
     } catch (const exception& exc) {
         std::cerr << "LOOP ANALYSIS: failed: " << exc.reason << "\n";

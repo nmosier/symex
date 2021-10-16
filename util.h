@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 #include <iostream>
+#include <numeric>
 
 #include <z3++.h>
 
@@ -56,14 +57,6 @@ inline expr bv_store(const expr& acc, const expr& val, unsigned lo) {
 
 inline expr bv_store(const expr& acc, unsigned val, unsigned hi, unsigned lo) {
     return bv_store(acc, acc.ctx().bv_val(val, hi - lo + 1), lo);
-}
-
-inline expr& operator+=(expr& acc, int val) {
-    return acc = acc + val;
-}
-
-inline expr& operator-=(expr& acc, int val) {
-    return acc = acc - val;
 }
 
 inline expr operator==(const z3::expr_vector& a, const z3::expr_vector& b) {
@@ -135,10 +128,93 @@ inline expr substitute(expr& e, const expr& src, const expr& dst) {
     return e.substitute(srcs, dsts);
 }
 
+inline expr dot_product(const z3::expr_vector& x, const z3::expr_vector& y) {
+    assert(x.size() == y.size());
+    assert(!x.empty());
+    context& ctx = x.ctx();
+    auto x_it = x.begin();
+    auto y_it = y.begin();
+    const expr init = *x_it++ * *y_it++;
+    return std::transform_reduce(x_it, x.end(), y_it, init, [] (const expr& a, const expr& b) -> expr {
+        return a + b;
+    }, [] (const expr& a, const expr& b) -> expr {
+        return a * b;
+    });
+}
+
+inline expr iff(const z3::expr& a, const z3::expr& b) {
+    assert(a.is_bool());
+    assert(b.is_bool());
+    return a == b;
+}
+
+template <typename... Ts>
+inline expr_vector make_expr_vector(context& ctx, Ts&&... exprs) {
+    expr_vector v {ctx};
+    (v.push_back(exprs), ...);
+    return v;
+}
+
+inline bool satisfying_assignment(z3::solver& solver, const z3::expr& pred, const z3::expr_vector& variables, z3::expr_vector& assignments) {
+    assert(pred.is_bool());
+    assert(assignments.empty());
+    
+    z3::context& ctx = solver.ctx();
+    const z3::scope scope {solver};
+    
+    const z3::expr_vector pred_v = z3::make_expr_vector(ctx, pred);
+    while (solver.check(pred_v) == z3::sat) {
+        const z3::eval eval {solver.get_model()};
+        const z3::scope scope {solver};
+        
+        z3::expr same_sol = ctx.bool_val(true);
+        for (const z3::expr& variable : variables) {
+            same_sol = same_sol && variable == eval(variable);
+        }
+        
+        const z3::expr_vector always = z3::make_expr_vector(ctx, same_sol, !pred);
+        if (solver.check(always) == z3::unsat) {
+            // found satisfying assignment
+            for (const z3::expr& variable : variables) {
+                assignments.push_back(eval(variable));
+            }
+            return true;
+        }
+        
+        for (const z3::expr& variable : variables) {
+            solver.add(!same_sol);
+        }
+    }
+    return false;
+}
+
+template <typename OutputIt>
+OutputIt enumerate(z3::solver& solver, const z3::expr& x, OutputIt out) {
+    const z3::scope scope {solver};
+    
+    while (solver.check() == z3::sat) {
+        const z3::eval eval {solver.get_model()};
+        const z3::expr x_con = eval(x);
+        *out++ = x_con;
+        solver.add(x != x_con);
+    }
+    
+    return out;
+}
+
+inline z3::expr reduce_and(const z3::expr_vector& v) {
+    z3::context& ctx = v.ctx();
+    return std::reduce(v.begin(), v.end(), ctx.bool_val(true), [] (const z3::expr& a, const z3::expr& b) -> z3::expr {
+        return a && b;
+    });
+}
+
+
 }
 
 
 namespace util {
+
 struct null_output_iterator {
     const null_output_iterator& operator++() const { return *this; }
     const null_output_iterator& operator++(int) const { return *this; }
@@ -185,6 +261,14 @@ template <typename T>
 std::string to_string(const T& x) {
     std::stringstream ss;
     ss << x;
+    return ss.str();
+}
+
+template <typename... Ts>
+std::string to_string(Ts&&... args) {
+    // from https://en.cppreference.com/w/cpp/language/parameter_pack
+    std::stringstream ss;
+    int dummy[sizeof...(Ts)] = { (ss << args, 0)... };
     return ss.str();
 }
 
