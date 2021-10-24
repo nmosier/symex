@@ -66,9 +66,12 @@ void Context::explore_paths_loop(const ArchState& init_arch, z3::solver& solver,
                 std::vector<CFG::Loop> loops;
                 cfg.get_loops(addr, std::back_inserter(loops));
                 for (auto& loop : loops) {
-#if 1
+#if 0
                     CFG::Loop::Analysis analysis(loop, entry.out, solver, *this);
                     loop_out = analysis.analyze();
+#elif 1
+                    CFG::Loop::Analysis2 analysis(loop, ctx);
+                    analysis.run();
 #else
                     loop_out = loop.analyze(entry.out, solver, *this);
 #endif

@@ -55,6 +55,7 @@ struct CFG::Loop {
     }
     
     struct Analysis;
+    struct Analysis2;
     
 private:
     using ReadVec = std::vector<MemState::Read>;
@@ -76,6 +77,30 @@ private:
     
     z3::expr constant(const std::string& s, const z3::sort& sort) const {
         return sort.ctx().constant(name(s).c_str(), sort);
+    }
+    
+};
+
+// TODO: move this elsewhere?
+struct Transfer {
+    ArchState in;
+    ArchState out;
+
+    using function_type = std::function<z3::expr (const z3::expr&)>;
+    
+    void transfer(ArchState& arch) const {
+        z3::context& ctx = in.ctx();
+        z3::expr_vector src {ctx}, dst {ctx};
+        ArchState::for_each([&] (const auto reg) {
+            src.push_back(in.*reg);
+            dst.push_back(arch.*reg);
+        });
+        arch = out;
+        arch.substitute(src, dst);
+    }
+    
+    void operator()(ArchState& arch) const {
+        transfer(arch);
     }
     
 };
@@ -173,6 +198,101 @@ private:
         exception(const std::string& reason): reason(reason) {}
     };
     
+};
+
+struct CFG::Loop::Analysis2 {
+    /* inputs */
+    const Loop& loop;
+    z3::context& ctx;
+    z3::solver solver;
+    // const Context& context;
+    
+    struct Register {
+        z3::expr ArchState::*reg;
+        Register(z3::expr ArchState::*reg): reg(reg) {}
+        
+        virtual z3::expr out(const ArchState& arch, const z3::expr& idx) const = 0;
+    };
+    struct ConstantRegister: Register {
+        ConstantRegister(z3::expr ArchState::*reg): Register(reg) {}
+        virtual z3::expr out(const ArchState& arch, const z3::expr& idx) const override {
+            return arch.*reg;
+        }
+    };
+    struct SequentialRegister: Register {
+        z3::expr step;
+        SequentialRegister(z3::expr ArchState::*reg, const z3::expr& step): Register(reg), step(step) {}
+        virtual z3::expr out(const ArchState& arch, const z3::expr& idx) const override {
+            return arch.*reg + idx * step;
+        }
+    };
+    struct CombinatorialRegister: Register {
+        CombinatorialRegister(z3::expr ArchState::*reg): Register(reg) {}
+        virtual z3::expr out(const ArchState& arch, const z3::expr& idx) const override {
+            // TODO
+            std::abort();
+        }
+    };
+    
+    /* data */
+    ArchState in;
+    ArchState out;
+    ArchState out_param;
+    std::vector<MemState::Read> reads;
+    std::vector<MemState::Write> writes;
+    std::vector<ConstantRegister> const_regs;
+    std::vector<SequentialRegister> seq_regs;
+    std::vector<CombinatorialRegister> comb_regs;
+    z3::expr niters;
+    
+    Analysis2(const Loop& loop, z3::context& ctx);
+    
+    Transfer run();
+    
+private:
+    void compute_iter();
+    void add_assumptions();
+    void compute_constant_regs();
+    void compute_sequential_regs();
+    void compute_combinatorial_regs();
+    
+    template <typename Container>
+    static bool is_register(z3::expr ArchState::*reg, const Container& container) {
+        return std::find_if(container.begin(), container.end(), [&] (const Register& reg_struct) -> bool {
+            return reg_struct.reg == reg;
+        }) != container.end();
+    }
+    
+    bool is_constant(z3::expr ArchState::*reg) const {
+        return is_register(reg, const_regs);
+    }
+    
+    bool is_sequential(z3::expr ArchState::*reg) const {
+        return is_register(reg, seq_regs);
+    }
+    
+    bool is_combinatorial(z3::expr ArchState::*reg) const {
+        return is_register(reg, comb_regs);
+    }
+    
+    bool is_classified(z3::expr ArchState::*reg) const {
+        if (reg == &ArchState::eip) { return true; }
+        return is_constant(reg) || is_sequential(reg) || is_combinatorial(reg);
+    }
+    
+    /* Since everything is fully symbolic/unconstrained, we should be able to deduce a transfer function that works
+     * for all iteration counts, subject to the initial assumptions (e.g. no aliasing).
+     *
+     * The proof would be inductive.
+     * To check if a register is constant, check if iter.in.reg == iter.out.reg.
+     * To check if a register is sequential, check if iter.in.reg + const == iter.out.reg for some const.
+     * To check if a register is combinatorial, check if iter.in.reg[in.seqs->out.seqs] == iter.out.reg.
+     */
+    
+    struct exception {
+        std::string reason;
+        exception(const std::string& reason): reason(reason) {}
+    };
 };
 
 template <typename OutputIt>

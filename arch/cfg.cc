@@ -142,6 +142,185 @@ OutputIt CFG::Loop::writes(const z3::expr& begin, const z3::expr& end, OutputIt 
 }
 
 
+CFG::Loop::Analysis2::Analysis2(const Loop& loop, z3::context& ctx): loop(loop), ctx(ctx), solver(ctx), in(ctx), out(ctx), out_param(ctx), niters(ctx) {
+    niters = ctx.bv_const("niters", 32);
+}
+
+void CFG::Loop::Analysis2::compute_iter() {
+    if (loop.exits.size() != 1) {
+        throw exception("more than one exit");
+    }
+    
+    // set `in`
+    in.symbolic();
+    in.eip = ctx.bv_val(loop.entry_addr(), 32);
+    
+    // set `out`
+    Iteration iter {in};
+    loop.transfer_iteration(iter, true);
+    out = iter.archs.back();
+    
+    // set `reads`
+    reads = iter.get_reads();
+    
+    // set `writes`
+    writes = iter.get_writes();
+}
+
+void CFG::Loop::Analysis2::add_assumptions() {
+    /* Assumption: no accesses alias. */
+    
+    // gather accesses
+    std::vector<MemState::Access> accesses;
+    std::copy(reads.begin(), reads.end(), std::back_inserter(accesses));
+    std::copy(writes.begin(), writes.end(), std::back_inserter(accesses));
+    
+    // get addresses
+    z3::expr_vector addrs {ctx};
+    for (const auto& access : accesses) {
+        for (unsigned i = 0; i < access.size(); ++i) {
+            addrs.push_back(access.addr + ctx.bv_val(i, 32));
+        }
+    }
+    
+    // assert all addresses distinct
+    solver.add(z3::distinct(addrs), "no-access-alias");
+}
+
+void CFG::Loop::Analysis2::compute_constant_regs() {
+    ArchState::for_each([&] (z3::expr ArchState::*reg) {
+        if (is_classified(reg)) { return; }
+        
+        const z3::scope scope {solver};
+        const z3::expr pred = in.*reg == out.*reg;
+        solver.add(!pred, "constant");
+        if (solver.check() == z3::unsat) {
+            // is constant!
+            const_regs.emplace_back(reg);
+            out_param.*reg = in.*reg;
+            std::cerr << "LOOP ANALYSIS: constant register " << in.*reg << "\n";
+        }
+    });
+}
+
+void CFG::Loop::Analysis2::compute_sequential_regs() {
+    ArchState::for_each_reg([&] (z3::expr ArchState::*reg) {
+        if (is_classified(reg)) { return; }
+        
+        std::cerr << in.*reg << "\n";
+
+        const z3::expr offset = ctx.bv_const("offset", 32);
+        const z3::expr pred = in.*reg + offset == out.*reg;
+        
+#if 0
+        z3::expr offset_con {ctx};
+        if (!z3::satisfying_assignment(solver, pred, offset, offset_con)) { return; }
+#else
+        /* The out register can only depend on the same in register.
+         */
+        z3::expr offset_con {ctx};
+        {
+            const z3::scope scope {solver};
+            solver.add(z3::forall(in.*reg, pred));
+            if (solver.check() != z3::sat) { return; }
+            offset_con = z3::eval(solver.get_model())(offset);
+            solver.add(offset != offset_con);
+            if (solver.check() != z3::unsat) { return; }
+        }
+        
+        std::cerr << "offset con: " << offset_con << "\n";
+#endif
+        
+        seq_regs.emplace_back(reg, offset_con);
+        out_param.*reg = in.*reg + niters * offset_con;
+    });
+}
+
+void CFG::Loop::Analysis2::compute_combinatorial_regs() {
+    ArchState::for_each_reg([&] (z3::expr ArchState::*reg) {
+        if (is_classified(reg)) { return; }
+        
+        const z3::scope scope {solver};
+        
+        // duplicate disallowed registers
+        z3::expr_vector orig {ctx}, dup {ctx};
+        ArchState::for_each([&] (z3::expr ArchState::*reg) {
+            if (is_constant(reg) || is_sequential(reg)) { return; }
+            orig.push_back(in.*reg);
+            dup.push_back(ctx.bv_const(util::to_string("dup", dup.size()).c_str(), (in.*reg).get_sort().bv_size()));
+            // solver.add(orig.back() != dup.back());
+        });
+        
+        std::cerr << orig << "\n" << dup << "\n";
+        
+        z3::expr orig_out = out.*reg;
+        const z3::expr dup_out = orig_out.substitute(orig, dup);
+        solver.add(orig_out != dup_out);
+        if (solver.check() != z3::unsat) {
+            throw exception(util::to_string("register ", in.*reg, " not combinatorial"));
+        }
+        
+        // substitute with sequential and constant regs
+        {
+            z3::expr_vector src {ctx}, dst {ctx};
+            const auto f = [&] (const auto& regs) {
+                for (const Register& reg : regs) {
+                    src.push_back(in.*reg.reg);
+                    dst.push_back(reg.out(in, niters - 1));
+                }
+            };
+            f(const_regs);
+            f(seq_regs);
+            
+            out_param.*reg = (out.*reg).substitute(src, dst);
+            comb_regs.emplace_back(reg);
+        }
+
+
+    });
+}
+
+Transfer CFG::Loop::Analysis2::run() {
+    try {
+        compute_iter();
+        add_assumptions();
+        compute_constant_regs();
+        compute_sequential_regs();
+        compute_combinatorial_regs();
+        
+        // print out results
+        const auto f = [&] (const std::string& s, const auto& c) {
+            std::cerr << s << " regs:";
+            for (const auto& reg : c) {
+                std::cerr << " " << in.*(reg.reg);
+            }
+            std::cerr << "\n";
+        };
+        f("const", const_regs);
+        f("sequential", seq_regs);
+        f("combinatorial", comb_regs);
+        
+        const auto g = [&] (const auto& c) {
+            for (const Register& reg : c) {
+                std::cerr << in.*reg.reg << " -> " << out_param.*reg.reg << "\n";
+            }
+        };
+        g(const_regs);
+        g(seq_regs);
+        g(comb_regs);
+
+        
+        
+    } catch (const exception& e) {
+        std::cerr << "LOOP ANALYSIS FAILED: " << e.reason << "\n";
+    }
+    
+    return Transfer {
+        .in = in,
+        .out = out_param,
+    };
+}
+
 void CFG::Loop::Analysis::set_iters_1() {
     // TODO: clean this up a bit.
     // NOTE: Be careful with the pointer when appending to arrays...
@@ -578,6 +757,10 @@ bool CFG::Loop::Analysis::compute_niters_5() {
     
     // const z3::expr linear_combo_con = linear_combo.substitute(scalars, scalars_con);
     std::cerr << "LOOP ANALYSIS: " << __FUNCTION__ << ": found niters expression: " << niters_expr.substitute(variables, variables_con) << "\n";
+    
+    out_param.substitute(z3::make_expr_vector(ctx(), num_iters),
+                         z3::make_expr_vector(ctx(), niters_expr));
+    return true;
 }
 
 z3::expr CFG::Loop::Analysis::build_niters_expr(const ArchState& in, z3::expr_vector& variables) {

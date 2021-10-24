@@ -164,6 +164,7 @@ inline bool satisfying_assignment(z3::solver& solver, const z3::expr& pred, cons
     
     const z3::expr_vector pred_v = z3::make_expr_vector(ctx, pred);
     while (solver.check(pred_v) == z3::sat) {
+        // std::cerr << "here\n";
         const z3::eval eval {solver.get_model()};
         const z3::scope scope {solver};
         
@@ -188,6 +189,41 @@ inline bool satisfying_assignment(z3::solver& solver, const z3::expr& pred, cons
     return false;
 }
 
+inline bool satisfying_assignment(z3::solver& solver, const z3::expr& pred, const z3::expr& variable, z3::expr& assignment) {
+    z3::context& ctx = solver.ctx();
+    z3::expr_vector variables {ctx}, assignments {ctx};
+    variables.push_back(variable);
+    if (satisfying_assignment(solver, pred, variables, assignments)) {
+        assignment = assignments[0];
+        return true;
+    } else {
+        return false;
+    }
+}
+
+inline z3::expr operator!=(const z3::expr_vector& a, const z3::expr_vector& b) {
+    return !(a == b);
+}
+
+inline bool unique_assignment(z3::solver& solver, const z3::expr& pred, const z3::expr_vector& variables, z3::expr_vector& assignments) {
+    if (!satisfying_assignment(solver, pred, variables, assignments)) {
+        return false;
+    }
+    const z3::scope scope {solver};
+    solver.add(variables != assignments);
+    return solver.check() == z3::unsat;
+}
+
+inline bool unique_assignment(z3::solver& solver, const z3::expr& pred, const z3::expr& variable, z3::expr& assignment) {
+    z3::context& ctx = solver.ctx();
+    z3::expr_vector assignments {ctx};
+    if (!unique_assignment(solver, pred, z3::make_expr_vector(ctx, variable), assignments)) {
+        return false;
+    }
+    assignment = assignments[0];
+    return true;
+}
+
 template <typename OutputIt>
 OutputIt enumerate(z3::solver& solver, const z3::expr& x, OutputIt out) {
     const z3::scope scope {solver};
@@ -208,7 +244,6 @@ inline z3::expr reduce_and(const z3::expr_vector& v) {
         return a && b;
     });
 }
-
 
 }
 
