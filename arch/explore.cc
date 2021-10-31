@@ -59,7 +59,14 @@ void Context::explore_paths_loop(const ArchState& init_arch, z3::solver& solver,
             
             // add to CFG
             cfg.add(addr);
-
+            
+            // print loop
+            if (addr == 0xa7de9cb4) {
+                if (solver.check() == z3::sat) {
+                    entry.out.stackdump(16, z3::eval {solver.get_model()});
+                }
+            }
+            
             // DEBUG: get & print loops
             std::optional<ArchState> loop_out;
             {
@@ -76,6 +83,15 @@ void Context::explore_paths_loop(const ArchState& init_arch, z3::solver& solver,
                     loop_out = loop.analyze(entry.out, solver, *this);
 #endif
                 }
+            }
+            
+            // DEBUG: function transfers
+            const auto transfers_it = transfers.find(addr);
+            if (transfers_it != transfers.end()) {
+                ArchState arch = entry.out;
+                transfers_it->second(arch, solver);
+                loop_out = arch;
+                std::cerr << "HERE\n";
             }
             
             trace.push_back(inst->I);

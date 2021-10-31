@@ -19,6 +19,7 @@ add_executable(x86-test
   peephole.h
   program.h
   ../util.h
+  ../abstract.h ../abstract.cc
   )
 
 if(1)

@@ -143,8 +143,7 @@ struct ArchState {
         return get_regs(std::begin(reg_ptrs), std::end(reg_ptrs));
     }
     
-    
-    
+    void stackdump(unsigned words, const z3::eval& eval) const;
 };
 
 std::ostream& operator<<(std::ostream& os, const ArchState& arch);

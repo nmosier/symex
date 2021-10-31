@@ -12,6 +12,7 @@
 #include "program.h"
 #include "peephole.h"
 #include "cfg.h"
+#include "abstract.h"
 
 namespace x86 {
 
@@ -26,6 +27,7 @@ struct Context {
     std::vector<MemoryRange> symbolic_ranges;
     std::vector<std::unique_ptr<Peephole>> peepholes;
     std::vector<const cs_insn *> trace;
+    std::unordered_map<addr_t, transfer::transfer_function_t> transfers;
     
     ~Context() { std::cerr << "trace " << trace.size() << "\n"; }
     
@@ -41,6 +43,7 @@ struct Context {
     Context(const std::string& core_path): ctx(), core(core_path.c_str()), program(core), cfg(program), zero(ctx.int_val(0)) {
         core.parse();
         peepholes.push_back(std::make_unique<ReadEIP>());
+        bind_abstract_transfers();
     }
     
     static constexpr int max = 16;
@@ -85,6 +88,12 @@ struct Context {
     
     template <typename InputIt>
     void apply_read_set(z3::solver& solver, InputIt begin, InputIt end) const;
+    
+    void bind_abstract_transfers() {
+        transfers.emplace(0xa7c5c279, transfer::sym_strncat);
+        transfers.emplace(0xa7de7e09, transfer::sym_strnlen);
+        //transfers.emplace(0x)
+    }
 };
 
 template <typename OutputIt>

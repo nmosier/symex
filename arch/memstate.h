@@ -69,10 +69,6 @@ struct MemState {
     static z3::expr get_init_mem(z3::context& ctx) {
         return ctx.constant("mem", ctx.array_sort(ctx.bv_sort(32), ctx.bv_sort(8)));
     }
-    
-private:
-    z3::expr read_aligned(const z3::expr& addr_hi, const z3::expr& addr_lo, unsigned size) const;
-    z3::expr read_unaligned(const z3::expr& addr_hi, const z3::expr& addr_lo, unsigned size) const;
 };
 
 template <typename OutputIt>

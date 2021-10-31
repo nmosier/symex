@@ -56,4 +56,11 @@ void ArchState::transform_expr(std::function<z3::expr (const z3::expr&)> f) {
     mem.mem = f(mem.mem);
 }
 
+
+void ArchState::stackdump(unsigned words, const z3::eval& eval) const {
+    for (int i = 0; i < words; ++i) {
+        std::cerr << eval(mem.read(esp + i * 4, 4, util::null_output_iterator())) << "\n";
+    }
+}
+
 }
