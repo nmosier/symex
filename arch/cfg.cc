@@ -142,7 +142,7 @@ OutputIt CFG::Loop::writes(const z3::expr& begin, const z3::expr& end, OutputIt 
 }
 
 
-CFG::Loop::Analysis2::Analysis2(const Loop& loop, z3::context& ctx): loop(loop), ctx(ctx), solver(ctx), in(ctx), out(ctx), out_param(ctx), niters(ctx) {
+CFG::Loop::Analysis2::Analysis2(const Loop& loop, z3::context& ctx): loop(loop), ctx(ctx), solver(ctx), in(ctx), out(ctx), out_param(ctx), niters(ctx), loop_pred(ctx) {
     niters = ctx.bv_const("niters", 32);
 }
 
@@ -212,10 +212,6 @@ void CFG::Loop::Analysis2::compute_sequential_regs() {
         const z3::expr offset = ctx.bv_const("offset", 32);
         const z3::expr pred = in.*reg + offset == out.*reg;
         
-#if 0
-        z3::expr offset_con {ctx};
-        if (!z3::satisfying_assignment(solver, pred, offset, offset_con)) { return; }
-#else
         /* The out register can only depend on the same in register.
          */
         z3::expr offset_con {ctx};
@@ -229,7 +225,6 @@ void CFG::Loop::Analysis2::compute_sequential_regs() {
         }
         
         std::cerr << "offset con: " << offset_con << "\n";
-#endif
         
         seq_regs.emplace_back(reg, offset_con);
         out_param.*reg = in.*reg + niters * offset_con;
@@ -280,13 +275,26 @@ void CFG::Loop::Analysis2::compute_combinatorial_regs() {
     });
 }
 
-Transfer CFG::Loop::Analysis2::run() {
+void CFG::Loop::Analysis2::set_loop_pred() {
+    /* Generate predicate for loop continuation condition in the form of a "forall" statement. */
+    const z3::expr idx = ctx.bv_const("idx", 32);
+    ArchState inter = out_param;
+    inter.substitute(z3::make_expr_vector(ctx, niters), z3::make_expr_vector(ctx, idx));
+    const z3::expr entry = ctx.bv_val(loop.entry_addr(), 32);
+    const z3::expr continue_pred = z3::forall(niters, z3::implies(0 <= idx && idx <= niters - 1, inter.eip == entry));
+    const z3::expr exit_pred = out_param.eip != entry;
+    
+    loop_pred = continue_pred && exit_pred;
+}
+
+void CFG::Loop::Analysis2::run() {
     try {
         compute_iter();
         add_assumptions();
         compute_constant_regs();
         compute_sequential_regs();
         compute_combinatorial_regs();
+        set_loop_pred();
         
         // print out results
         const auto f = [&] (const std::string& s, const auto& c) {
@@ -315,10 +323,6 @@ Transfer CFG::Loop::Analysis2::run() {
         std::cerr << "LOOP ANALYSIS FAILED: " << e.reason << "\n";
     }
     
-    return Transfer {
-        .in = in,
-        .out = out_param,
-    };
 }
 
 void CFG::Loop::Analysis::set_iters_1() {

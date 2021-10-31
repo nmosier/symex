@@ -82,6 +82,7 @@ int main(int argc, char *argv[]) {
     x86::Context ctx {core};
     ctx.symbolic_ranges = symbolic_ranges;
     
+    
     assert(ctx.core.thread(0).flavor == x86_THREAD_STATE32);
     
     std::cerr << ctx.core.nsegments() << " segments\n";

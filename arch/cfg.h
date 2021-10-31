@@ -81,30 +81,6 @@ private:
     
 };
 
-// TODO: move this elsewhere?
-struct Transfer {
-    ArchState in;
-    ArchState out;
-
-    using function_type = std::function<z3::expr (const z3::expr&)>;
-    
-    void transfer(ArchState& arch) const {
-        z3::context& ctx = in.ctx();
-        z3::expr_vector src {ctx}, dst {ctx};
-        ArchState::for_each([&] (const auto reg) {
-            src.push_back(in.*reg);
-            dst.push_back(arch.*reg);
-        });
-        arch = out;
-        arch.substitute(src, dst);
-    }
-    
-    void operator()(ArchState& arch) const {
-        transfer(arch);
-    }
-    
-};
-
 
 struct CFG::Loop::Iteration {
     std::vector<ArchState> archs; // n+1
@@ -244,10 +220,11 @@ struct CFG::Loop::Analysis2 {
     std::vector<SequentialRegister> seq_regs;
     std::vector<CombinatorialRegister> comb_regs;
     z3::expr niters;
+    z3::expr loop_pred;
     
     Analysis2(const Loop& loop, z3::context& ctx);
     
-    Transfer run();
+    void run();
     
 private:
     void compute_iter();
@@ -255,6 +232,7 @@ private:
     void compute_constant_regs();
     void compute_sequential_regs();
     void compute_combinatorial_regs();
+    void set_loop_pred();
     
     template <typename Container>
     static bool is_register(z3::expr ArchState::*reg, const Container& container) {
