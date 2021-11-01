@@ -20,6 +20,7 @@ add_executable(x86-test
   program.h
   ../util.h
   ../abstract.h ../abstract.cc
+  ../transfer.cc ../transfer.h
   )
 
 if(1)

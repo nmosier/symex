@@ -279,12 +279,16 @@ void CFG::Loop::Analysis2::set_loop_pred() {
     /* Generate predicate for loop continuation condition in the form of a "forall" statement. */
     const z3::expr idx = ctx.bv_const("idx", 32);
     ArchState inter = out_param;
-    inter.substitute(z3::make_expr_vector(ctx, niters), z3::make_expr_vector(ctx, idx));
+    inter.substitute(z3::make_expr_vector(niters), z3::make_expr_vector(idx));
     const z3::expr entry = ctx.bv_val(loop.entry_addr(), 32);
     const z3::expr continue_pred = z3::forall(niters, z3::implies(0 <= idx && idx <= niters - 1, inter.eip == entry));
     const z3::expr exit_pred = out_param.eip != entry;
     
     loop_pred = continue_pred && exit_pred;
+}
+
+void CFG::Loop::Analysis2::parameterize_accesses() {
+    
 }
 
 void CFG::Loop::Analysis2::run() {
@@ -316,14 +320,27 @@ void CFG::Loop::Analysis2::run() {
         g(const_regs);
         g(seq_regs);
         g(comb_regs);
+        
+        std::cerr << "loop pred: " << loop_pred << "\n";
 
-        
-        
     } catch (const exception& e) {
         std::cerr << "LOOP ANALYSIS FAILED: " << e.reason << "\n";
     }
     
+    
 }
+
+
+bool CFG::Loop::Analysis2::Transfer::transfer(x86::ArchState& arch, z3::solver& solver) const {
+    /* check hypotheses */
+    check_noalias(arch, solver);
+}
+
+bool CFG::Loop::Analysis2::Transfer::check_noalias(x86::ArchState& arch, z3::solver& solver) const {
+    // TODO
+    std::abort();
+}
+
 
 void CFG::Loop::Analysis::set_iters_1() {
     // TODO: clean this up a bit.
@@ -801,5 +818,7 @@ std::optional<ArchState> CFG::Loop::Analysis::analyze() {
         return std::nullopt;
     }
 }
+
+
 
 }

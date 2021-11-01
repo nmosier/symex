@@ -7,6 +7,7 @@
 #include "x86.h"
 #include "inst.h"
 #include "program.h"
+#include "transfer.h"
 
 namespace x86 {
 
@@ -224,6 +225,7 @@ struct CFG::Loop::Analysis2 {
     
     Analysis2(const Loop& loop, z3::context& ctx);
     
+    class Transfer;
     void run();
     
 private:
@@ -233,6 +235,7 @@ private:
     void compute_sequential_regs();
     void compute_combinatorial_regs();
     void set_loop_pred();
+    void parameterize_accesses();
     
     template <typename Container>
     static bool is_register(z3::expr ArchState::*reg, const Container& container) {
@@ -271,6 +274,20 @@ private:
         std::string reason;
         exception(const std::string& reason): reason(reason) {}
     };
+};
+
+class CFG::Loop::Analysis2::Transfer: public ::Transfer {
+public:
+    Transfer(const ArchState& in, const ArchState& out, const z3::expr& loop_pred): in(in), out(out), loop_pred(loop_pred) {}
+    
+protected:
+    virtual bool transfer(x86::ArchState& arch, z3::solver& solver) const override;
+    
+private:
+    ArchState in, out;
+    z3::expr loop_pred;
+    
+    bool check_noalias(x86::ArchState& arch, z3::solver& solver) const;
 };
 
 template <typename OutputIt>

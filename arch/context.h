@@ -90,9 +90,11 @@ struct Context {
     void apply_read_set(z3::solver& solver, InputIt begin, InputIt end) const;
     
     void bind_abstract_transfers() {
+#if 0
         transfers.emplace(0xa7c5c279, transfer::sym_strncat);
         transfers.emplace(0xa7de7e09, transfer::sym_strnlen);
         //transfers.emplace(0x)
+#endif
     }
 };
 

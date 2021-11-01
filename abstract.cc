@@ -33,17 +33,20 @@ z3::expr strlen(const x86::ArchState& arch, const z3::expr& addr, z3::solver& so
     z3::context& ctx = arch.ctx();
     const z3::expr& mem = arch.mem.mem;
     
-    // see if we can 
-    
-    
-    
     const z3::expr len = ctx.bv_const(util::to_string("strlen", id++).c_str(), 32);
     const z3::expr idx = ctx.bv_const("idx", 32);
     const z3::expr is_zero = mem[addr + len] == 0;
     const z3::expr is_nonzero = z3::forall(idx, z3::implies(idx >= 0 && idx < len, mem[addr + idx] != 0));
-    solver.add(len >= 0 && is_zero && is_nonzero);
+    const z3::expr pred = (len >= 0 && is_zero && is_nonzero);
     
-    return len;
+    z3::expr_vector assignments {ctx};
+    if (z3::unique_assignment(solver, pred, z3::make_expr_vector(ctx, len), assignments)) {
+        /* found unique concrete assignment */
+        return assignments[0];
+    } else {
+        solver.add(pred);
+        return len;
+    }
 }
 
 /// returns length

@@ -155,6 +155,25 @@ inline expr_vector make_expr_vector(context& ctx, Ts&&... exprs) {
     return v;
 }
 
+namespace detail {
+
+inline void make_expr_vector_impl(z3::expr_vector& v) {}
+
+template <typename... Ts>
+void make_expr_vector_impl(z3::expr_vector& v, const z3::expr& e, const Ts&... es) {
+    v.push_back(e);
+    make_expr_vector_impl(v, es...);
+}
+
+}
+
+template <typename... Ts>
+inline z3::expr_vector make_expr_vector(const z3::expr& e, const Ts&... ts) {
+    z3::expr_vector v {e.ctx()};
+    detail::make_expr_vector_impl(v, e, ts...);
+    return v;
+}
+
 inline bool satisfying_assignment(z3::solver& solver, const z3::expr& pred, const z3::expr_vector& variables, z3::expr_vector& assignments) {
     assert(pred.is_bool());
     assert(assignments.empty());
