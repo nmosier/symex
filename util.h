@@ -245,23 +245,29 @@ inline bool unique_assignment(z3::solver& solver, const z3::expr& pred, const z3
 
 template <typename OutputIt>
 OutputIt enumerate(z3::solver& solver, const z3::expr& x, OutputIt out) {
-    const z3::scope scope {solver};
+    z3::expr_vector v {solver.ctx()};
     
-    while (solver.check() == z3::sat) {
+    while (true) {
+        const auto t0 = ::clock();
+        const auto res = solver.check(v);
+        const auto t1 = ::clock();
+        std::cerr << "enumerate: " << res << " in " << (static_cast<float>(t1 - t0) / CLOCKS_PER_SEC) << "\n";
+        switch (res) {
+            case z3::sat:
+                break;
+            case z3::unsat:
+                return out;
+            case z3::unknown:
+                std::cerr << __FUNCTION__ << ": unknown: " << solver.reason_unknown() << "\n";
+                std::abort();
+            default: std::abort();
+        }
+        
         const z3::eval eval {solver.get_model()};
         const z3::expr x_con = eval(x);
         *out++ = x_con;
-        solver.add(x != x_con);
+        v.push_back(x != x_con);
     }
-    
-    return out;
-}
-
-inline z3::expr reduce_and(const z3::expr_vector& v) {
-    z3::context& ctx = v.ctx();
-    return std::reduce(v.begin(), v.end(), ctx.bool_val(true), [] (const z3::expr& a, const z3::expr& b) -> z3::expr {
-        return a && b;
-    });
 }
 
 }

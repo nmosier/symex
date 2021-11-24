@@ -782,7 +782,7 @@ bool CFG::Loop::Analysis::compute_niters_5() {
     }
     
     z3::expr_vector variables_con {ctx()};
-    if (!z3::satisfying_assignment(solver, z3::reduce_and(preds), variables, variables_con)) {
+    if (!z3::satisfying_assignment(solver, z3::mk_and(preds), variables, variables_con)) {
         std::cerr << "LOOP ANALYSIS: " << __FUNCTION__ << ": couldn't find niters expression\n";
         return false;
     }

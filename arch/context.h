@@ -76,7 +76,7 @@ struct Context {
     void explore_paths_rec_write(Program& program, const ArchState& in_arch, const ArchState& out_arch, z3::solver& solver, const ByteMap& write_mask, const WriteVec& writes, WriteVec::const_iterator write_it);
     
     void explore_paths_rec(Program& program, const ArchState& in_arch, z3::solver& solver, addr_t addr, ByteMap write_mask);
-    void explore_paths_rec2(Program& program, const ArchState& in_arch, addr_t addr, z3::solver& solver, ByteMap initialized_mem, ReadVec reads);
+    void explore_paths_rec2(Program& program, const ArchState& in_arch, addr_t addr, z3::solver& solver, ByteMap initialized_mem);
     bool check_sat(const z3::expr_vector& preds, const ArchState& arch, z3::solver& solver, const ReadVec& reads, ByteMap& initialized_mem);
     bool check_sat(const z3::expr& pred, const ArchState& arch, z3::solver& solver, const ReadVec& reads, ByteMap& initialized_mem);
     template <class OutputIt>
