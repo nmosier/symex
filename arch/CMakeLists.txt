@@ -21,6 +21,7 @@ add_executable(x86-test
   ../util.h
   ../abstract.h ../abstract.cc
   ../transfer.cc ../transfer.h
+  config.cc config.h
   )
 
 if(0)

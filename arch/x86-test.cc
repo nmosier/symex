@@ -11,6 +11,7 @@
 #include "x86.h"
 #include "program.h"
 #include "context.h"
+#include "config.h"
 
 csh g_handle;
 
@@ -45,8 +46,6 @@ uint64_t parse_uint64(const char *s) {
 int main(int argc, char *argv[]) {
     prog = argv[0];
     
-    std::vector<x86::MemoryRange> symbolic_ranges;
-    
     int optc;
     while ((optc = getopt(argc, argv, "hs:")) >= 0) {
         switch (optc) {
@@ -60,7 +59,8 @@ int main(int argc, char *argv[]) {
                 x86::MemoryRange range;
                 range.base = parse_uint64(base_s);
                 range.len = parse_uint64(len_s);
-                symbolic_ranges.push_back(range);
+                conf::symbolic_ranges.push_back(range);
+                conf::deterministic = false;
                 break;
             }
             default:
@@ -80,7 +80,7 @@ int main(int argc, char *argv[]) {
     g_handle = program.handle.get_handle();
     
     x86::Context ctx {core};
-    ctx.symbolic_ranges = symbolic_ranges;
+    ctx.symbolic_ranges = conf::symbolic_ranges;
     
     
     assert(ctx.core.thread(0).flavor == x86_THREAD_STATE32);

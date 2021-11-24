@@ -1,3 +1,5 @@
+#include <fstream>
+#include <sstream>
 #include <gperftools/profiler.h>
 
 #include "x86.h"
@@ -5,9 +7,33 @@
 #include "context.h"
 #include "util.h"
 #include "peephole.h"
+#include "config.h"
 
 namespace x86 {
 
+void Context::dump_trace(const z3::model& model) {
+    std::stringstream ss;
+    ss << "trace" << trace_counter++ << ".asm";
+    std::ofstream ofs {ss.str()};
+    
+    /* print out symbolic ranges */
+    const auto init_mem = MemState::get_init_mem(ctx);
+    for (const auto& sym_range : symbolic_ranges) {
+        z3::expr_vector v {ctx};
+        for (uint64_t i = 0; i < sym_range.len; ++i) {
+            const z3::expr addr = ctx.bv_val(sym_range.base + i, 32);
+            v.push_back(init_mem[addr]);
+        }
+        ofs << std::hex << sym_range.base << ":" << sym_range.len << " = " << model.eval(z3::concat(v), true) << "\n";
+    }
+    
+    /* print out instructions */
+    for (const cs_insn *I : trace) {
+        ofs << std::hex << I->address << ": " << I->mnemonic << " " << I->op_str << "\n";
+    }
+
+    std::cerr << "dumped trace to " << ss.str() << "\n";
+}
 
 
 void Context::explore_paths_rec(Program& program, const ArchState& in_arch, z3::solver& solver, addr_t addr, ByteMap write_mask) {
@@ -20,7 +46,8 @@ void Context::explore_paths_rec(Program& program, const ArchState& in_arch, z3::
         });
         if (seg_it == core.segments_end()) {
             std::cerr << "jump outside of address space: " << std::hex << addr << "\n";
-            dump_trace("trace.asm", trace);
+            if (solver.check() != z3::sat) { std::abort(); }
+            dump_trace(solver.get_model());
             return;
         }
         // TODO: make this safer
@@ -95,10 +122,11 @@ void Context::explore_paths() {
     }
     
     auto e = in_arch.mem.read(in_arch.esp, 4, util::null_output_iterator());
-    solver.push();
-    solver.add(e != 0x42424242);
-    assert(solver.check() == z3::unsat);
-    solver.pop();
+    {
+        z3::expr_vector v {ctx};
+        v.push_back(e != 0x42424242);
+        assert(solver.check(v) == z3::unsat);
+    }
  
 #if 0
     explore_paths_loop(in_arch, solver, write_mask);
@@ -123,10 +151,12 @@ void Context::explore_paths_rec_dst(Program& program, const ArchState& in_arch, 
             }
             break;
         }
-        if (count > 0) {
+
+        if (conf::deterministic && count > 0) {
             std::cerr << "error: nondeterministic\n";
             std::abort();
         }
+        
         const z3::model model = solver.get_model();
         const z3::expr eip = model.eval(out_arch.eip);
         std::cerr << "dst " << eip << "\n";
@@ -142,7 +172,7 @@ void Context::explore_paths_rec_dst(Program& program, const ArchState& in_arch, 
     }
 }
 
-void Context::explore_paths_rec_read(Program& program, const ArchState& in_arch, const ArchState& out_arch, z3::solver& solver, const ByteMap& write_mask, const ReadVec& reads, const WriteVec& writes, ReadVec::const_iterator read_it) {
+void Context::explore_paths_rec_read(Program& program, const ArchState& in_arch, ArchState& out_arch, z3::solver& solver, const ByteMap& write_mask, const ReadVec& reads, const WriteVec& writes, ReadVec::const_iterator read_it) {
     
     if (read_it == reads.end()) {
         explore_paths_rec_write(program, in_arch, out_arch, solver, write_mask, writes, writes.begin());
@@ -173,6 +203,19 @@ void Context::explore_paths_rec_read(Program& program, const ArchState& in_arch,
         {
             const z3::scope scope {solver};
             solver.add(con_read == sym_read);
+            
+#if 1
+            // EXPERIMENTAL: replace expression
+            {
+                z3::expr_vector src(ctx);
+                z3::expr_vector dst(ctx);
+                src.push_back(sym_read.addr); dst.push_back(con_read.addr);
+                src.push_back(sym_read.data); dst.push_back(con_read.data);
+                
+                out_arch.substitute(src, dst);
+            }
+#endif
+            
             explore_paths_rec_read(program, in_arch, out_arch, solver, write_mask, reads, writes, std::next(read_it));
         }
         solver.add(con_read.addr != sym_read.addr);

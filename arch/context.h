@@ -68,10 +68,10 @@ struct Context {
     void explore_paths_loop(const ArchState& in_arch, z3::solver& solver, const ByteMap& init_write_mask);
     
     void explore_paths();
-
+    
     void explore_paths_rec_dst(Program& program, const ArchState& in_arch, const ArchState& out_arch, z3::solver& solver, const ByteMap& write_mask);
     
-    void explore_paths_rec_read(Program& program, const ArchState& in_arch, const ArchState& out_arch, z3::solver& solver, const ByteMap& write_mask, const ReadVec& reads, const WriteVec& writes, ReadVec::const_iterator read_it);
+    void explore_paths_rec_read(Program& program, const ArchState& in_arch, ArchState& out_arch, z3::solver& solver, const ByteMap& write_mask, const ReadVec& reads, const WriteVec& writes, ReadVec::const_iterator read_it);
     
     void explore_paths_rec_write(Program& program, const ArchState& in_arch, const ArchState& out_arch, z3::solver& solver, const ByteMap& write_mask, const WriteVec& writes, WriteVec::const_iterator write_it);
     
@@ -85,6 +85,9 @@ struct Context {
     void check_accesses(const ReadVec& reads, const WriteVec& writes, z3::solver& solver);
     void check_operands(const Inst& I, const ArchState& arch, z3::solver& solver);
     void check_regs(const ArchState& arch);
+    
+    unsigned trace_counter = 0;
+    void dump_trace(const z3::model& model);
     
     std::optional<z3::model> find_execution(z3::solver& solver, const ReadVec& reads) const;
     
