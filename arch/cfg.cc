@@ -153,7 +153,11 @@ void CFG::Loop::Analysis2::compute_iter() {
     
     // set `in`
     in.symbolic();
+#if 1
     in.eip = ctx.bv_val(loop.entry_addr(), 32);
+#else
+    solver.add(in.eip == ctx.bv_val(loop.entry_addr(), 32), "eip-entry");
+#endif
     
     // set `out`
     Iteration iter {in};
@@ -232,8 +236,10 @@ void CFG::Loop::Analysis2::compute_sequential_regs() {
 }
 
 void CFG::Loop::Analysis2::compute_combinatorial_regs() {
+    std::cerr << "zf: " << out.zf << "\n";
+    
     ArchState::for_each_reg([&] (z3::expr ArchState::*reg) {
-        if (is_classified(reg)) { return; }
+        if (is_classified(reg) && reg != &ArchState::eip) { return; }
         
         const z3::scope scope {solver};
         
@@ -246,12 +252,12 @@ void CFG::Loop::Analysis2::compute_combinatorial_regs() {
             // solver.add(orig.back() != dup.back());
         });
         
-        std::cerr << orig << "\n" << dup << "\n";
-        
         z3::expr orig_out = out.*reg;
         const z3::expr dup_out = orig_out.substitute(orig, dup);
         solver.add(orig_out != dup_out);
         if (solver.check() != z3::unsat) {
+            std::cerr << "orig out: " << orig_out << "\n";
+            std::cerr << "dup out:  " << dup_out << "\n";
             throw exception(util::to_string("register ", in.*reg, " not combinatorial"));
         }
         
@@ -288,10 +294,12 @@ void CFG::Loop::Analysis2::set_loop_pred() {
 }
 
 void CFG::Loop::Analysis2::parameterize_accesses() {
-    
+    for (MemState::Read& read : reads) {
+        
+    }
 }
 
-void CFG::Loop::Analysis2::run() {
+std::optional<CFG::Loop::Analysis2::Transfer> CFG::Loop::Analysis2::run() {
     try {
         compute_iter();
         add_assumptions();
@@ -322,9 +330,12 @@ void CFG::Loop::Analysis2::run() {
         g(comb_regs);
         
         std::cerr << "loop pred: " << loop_pred << "\n";
+        
+        return std::nullopt;
 
     } catch (const exception& e) {
         std::cerr << "LOOP ANALYSIS FAILED: " << e.reason << "\n";
+        return std::nullopt;
     }
     
     

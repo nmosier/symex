@@ -23,7 +23,7 @@ add_executable(x86-test
   ../transfer.cc ../transfer.h
   )
 
-if(1)
+if(0)
 target_compile_options(x86-test PUBLIC
   -fsanitize=address
   )

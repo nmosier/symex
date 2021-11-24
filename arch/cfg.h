@@ -226,7 +226,7 @@ struct CFG::Loop::Analysis2 {
     Analysis2(const Loop& loop, z3::context& ctx);
     
     class Transfer;
-    void run();
+    std::optional<Transfer> run();
     
 private:
     void compute_iter();
