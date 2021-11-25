@@ -22,9 +22,11 @@ add_executable(x86-test
   ../abstract.h ../abstract.cc
   ../transfer.cc ../transfer.h
   config.cc config.h
+  node.cc node.h
+  block.h
   )
 
-if(0)
+if(1)
 target_compile_options(x86-test PUBLIC
   -fsanitize=address
   )

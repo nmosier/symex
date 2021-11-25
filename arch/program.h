@@ -1,5 +1,7 @@
 #pragma once
 
+#include <memory>
+
 #include "x86.h"
 #include "inst.h"
 
@@ -8,9 +10,7 @@ namespace x86 {
 struct Program {
     cs::handle handle {CS_ARCH_X86, CS_MODE_32};
     std::vector<cs::insns> insns;
-    std::map<addr_t, Inst> map;
-    using BasicBlock = std::vector<Inst>;
-    std::map<addr_t, BasicBlock> blocks;
+    std::map<addr_t, Node *> map;
     
     Program() {
         handle.detail(true);
@@ -22,7 +22,7 @@ struct Program {
         assert(new_insns.size() == count);
         for (cs_insn& new_insn : new_insns) {
             const Inst inst {&new_insn};
-            map.emplace(new_insn.address, inst);
+            map.emplace(new_insn.address, new Inst(inst));
         }
         insns.push_back(std::move(new_insns));
         return count;
@@ -33,8 +33,12 @@ struct Program {
         return disasm(container.data(), container.size() * sizeof(container.data()[0]), address, count);
     }
     
-    const Inst& at(addr_t addr) const {
-        return map.at(addr);
+    Node& at(addr_t addr) const {
+        return *map.at(addr);
+    }
+    
+    bool contains(addr_t addr) const {
+        return map.contains(addr);
     }
     
     void compute_basic_blocks();
@@ -46,7 +50,7 @@ struct CoreProgram {
     
     CoreProgram(const cores::MachOCore& core): core(core) {}
     
-    const Inst *disasm(addr_t addr) {
+    Node *disasm(addr_t addr) {
         if (program.map.find(addr) == program.map.end()) {
             // find address in core
             const auto seg_it = std::find_if(core.segments_begin(), core.segments_end(), [&] (const cores::Segment& seg) {
@@ -60,11 +64,15 @@ struct CoreProgram {
             program.disasm((const uint8_t *) data, 16, addr, 1);
         }
         
-        return &program.map.at(addr);
+        return program.map.at(addr);
     }
     
-    const Inst& at(addr_t addr) const {
+    Node& at(addr_t addr) const {
         return program.at(addr);
+    }
+    
+    bool contains(addr_t addr) const {
+        return program.contains(addr);
     }
 };
 

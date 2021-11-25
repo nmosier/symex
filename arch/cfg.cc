@@ -63,15 +63,13 @@ void CFG::add(addr_t addr) {
         fwd[addr];
         rev[addr];
         
-        const Inst *I = program.disasm(addr);
-        if (I == nullptr) { continue; }
+        const Node *N = program.disasm(addr);
+        if (N == nullptr) { continue; }
         
-        AddrVec succs;
-        get_successors(addr, *I->I, std::back_inserter(succs));
+        const auto succs = N->exits();
         for (addr_t succ : succs) {
             add_edge(addr, succ);
         }
-        
         std::copy(succs.begin(), succs.end(), std::back_inserter(todo));
     }
 }
