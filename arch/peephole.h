@@ -28,14 +28,15 @@ struct Peephole {
 struct ReadEIP: Peephole {
     virtual bool operator()(addr_t eip0, CoreProgram& program, ArchState& arch, ReadOut read_out, WriteOut write_out) const override {
         z3::context& ctx = arch.ctx();
-        const Inst *I = dynamic_cast<const Inst *>(program.disasm(eip0));
+        const Inst *I;
+        I = program.disasm(eip0);
         if (I == nullptr) { return false; }
         if (I->I->id != X86_INS_CALL) { return false; }
         const Operand op {I->x86->operands[0]};
         if (op.op.type != X86_OP_IMM) { return false; }
         const addr_t eip1 = eip0 + I->I->size;
         if (op.op.imm != eip1) { return false; }
-        I = dynamic_cast<const Inst *>(program.disasm(eip1));
+        I = program.disasm(eip1);
         if (I == nullptr) { return false; }
         if (I->I->id != X86_INS_POP) { return false; }
         const Operand dst {I->x86->operands[0]};

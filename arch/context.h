@@ -13,7 +13,6 @@
 #include "peephole.h"
 #include "cfg.h"
 #include "abstract.h"
-#include "node.h"
 
 namespace x86 {
 
@@ -23,16 +22,11 @@ struct Context {
     z3::context ctx;
     cores::MachOCore core;
     CoreProgram program;
-    // CFG cfg;
+    CFG cfg;
     
     std::vector<MemoryRange> symbolic_ranges;
     std::vector<std::unique_ptr<Peephole>> peepholes;
-    struct TraceEntry {
-        Node *node;
-        ArchState in;
-    };
-    using Trace = std::vector<TraceEntry>;
-    Trace trace;
+    std::vector<const cs_insn *> trace;
     std::unordered_map<addr_t, transfer::transfer_function_t> transfers;
     
     ~Context() { std::cerr << "trace " << trace.size() << "\n"; }
@@ -46,7 +40,7 @@ struct Context {
         return ctx.constant(std::to_string(next_id++).c_str(), sort);
     }
     
-    Context(const std::string& core_path): ctx(), core(core_path.c_str()), program(core), zero(ctx.int_val(0)) {
+    Context(const std::string& core_path): ctx(), core(core_path.c_str()), program(core), cfg(program), zero(ctx.int_val(0)) {
         core.parse();
         peepholes.push_back(std::make_unique<ReadEIP>());
         bind_abstract_transfers();
@@ -71,19 +65,22 @@ struct Context {
     
     std::optional<Assignment> explore_paths_find_assigment(const ArchState& in_arch, const ArchState& out_arch, z3::solver& solver, ByteMap write_mask, const ReadVec& reads, const WriteVec& writes);
     
+    void explore_paths_loop(const ArchState& in_arch, z3::solver& solver, const ByteMap& init_write_mask);
+    
     void explore_paths();
     
     void explore_paths_rec_dst(Program& program, const ArchState& in_arch, const ArchState& out_arch, z3::solver& solver, const ByteMap& write_mask);
     
     void explore_paths_rec_read(Program& program, const ArchState& in_arch, ArchState& out_arch, z3::solver& solver, const ByteMap& write_mask, const ReadVec& reads, const WriteVec& writes, ReadVec::const_iterator read_it);
-    void explore_paths_rec_read2(Program& program, const ArchState& in_arch, ArchState& out_arch, z3::solver& solver, const ByteMap& write_mask, const ReadVec& reads, const WriteVec& writes);
-
+    
     void explore_paths_rec_write(Program& program, const ArchState& in_arch, const ArchState& out_arch, z3::solver& solver, const ByteMap& write_mask, const WriteVec& writes, WriteVec::const_iterator write_it);
     
     void explore_paths_rec(Program& program, const ArchState& in_arch, z3::solver& solver, addr_t addr, ByteMap write_mask);
     void explore_paths_rec2(Program& program, const ArchState& in_arch, addr_t addr, z3::solver& solver, ByteMap initialized_mem);
     bool check_sat(const z3::expr_vector& preds, const ArchState& arch, z3::solver& solver, const ReadVec& reads, ByteMap& initialized_mem);
     bool check_sat(const z3::expr& pred, const ArchState& arch, z3::solver& solver, const ReadVec& reads, ByteMap& initialized_mem);
+    template <class OutputIt>
+    void find_assignments(const z3::expr& value, const ArchState& arch, z3::solver& solver, const ReadVec& reads, ByteMap& initialized_mem, OutputIt out);
 
     void check_accesses(const ReadVec& reads, const WriteVec& writes, z3::solver& solver);
     void check_operands(const Inst& I, const ArchState& arch, z3::solver& solver);
@@ -92,13 +89,13 @@ struct Context {
     unsigned trace_counter = 0;
     void dump_trace(const z3::model& model);
     
-    template <typename InputIt>
-    void apply_read_set(z3::solver& solver, InputIt begin, InputIt end) const;
-    
-    Node *query_cfg(addr_t addr);
+    std::optional<z3::model> find_execution(z3::solver& solver, const ReadVec& reads) const;
     
     template <typename OutputIt>
     OutputIt cover_execution(z3::solver& solver, const ReadVec& reads, OutputIt read_set_out) const;
+    
+    template <typename InputIt>
+    void apply_read_set(z3::solver& solver, InputIt begin, InputIt end) const;
     
     void bind_abstract_transfers() {
 #if 0
@@ -107,16 +104,8 @@ struct Context {
         //transfers.emplace(0x)
 #endif
     }
-    
-    unsigned assertion_id = 0;
-    template <typename... Args>
-    std::string name(Args&&... args) {
-        return util::to_string(std::forward<Args>(args)..., ":", assertion_id++);
-    }
 };
 
-
-#if 1
 template <typename OutputIt>
 OutputIt Context::cover_execution(z3::solver& solver, const ReadVec& reads, OutputIt read_set_out) const {
     z3::context& ctx = solver.ctx();
@@ -153,7 +142,6 @@ OutputIt Context::cover_execution(z3::solver& solver, const ReadVec& reads, Outp
     
     return std::copy(read_set.begin(), read_set.end(), read_set_out);
 }
-#endif
 
 template <typename InputIt>
 void Context::apply_read_set(z3::solver& solver, InputIt begin, InputIt end) const {

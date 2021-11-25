@@ -312,7 +312,7 @@ void CFG::get_loops_rec(addr_t addr, Loop& loop, AddrSet& seen, OutputIt& out) c
     }
     
     // recursive case
-    const Inst& I = dynamic_cast<const Inst&>(program.at(addr));
+    const Inst& I = program.at(addr);
     loop.body.push_back(I);
     const auto& succs = fwd.at(addr);
     if (succs.size() > 1) {

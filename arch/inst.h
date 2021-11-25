@@ -2,74 +2,22 @@
 
 #include "archstate.h"
 #include "operands.h"
-#include "node.h"
 
 namespace x86 {
 
-struct Inst: Node {
+struct Inst {
     cs_insn *I;
     cs_x86 *x86;
     
     Inst(cs_insn *I): I(I), x86(&I->detail->x86) {}
     
-    virtual void transfer(ArchState& arch, ReadOut read_out, WriteOut write_out) const override;
+    using ReadOut = std::back_insert_iterator<std::vector<MemState::Read>>;
+    using WriteOut = std::back_insert_iterator<std::vector<MemState::Write>>;
+    
+    void transfer(ArchState& arch, ReadOut read_out, WriteOut write_out) const;
     
     bool operator<(const Inst& other) const {
         return I < other.I;
-    }
-    
-    virtual addr_t entry() const override {
-        return I->address;
-    }
-    
-    virtual AddrSet exits() const override {
-        AddrSet exits;
-        
-        switch (I->id) {
-            case X86_INS_JAE:
-            case X86_INS_JA:
-            case X86_INS_JBE:
-            case X86_INS_JB:
-            case X86_INS_JCXZ:
-            case X86_INS_JECXZ:
-            case X86_INS_JE:
-            case X86_INS_JGE:
-            case X86_INS_JG:
-            case X86_INS_JLE:
-            case X86_INS_JL:
-            case X86_INS_JNE:
-            case X86_INS_JNO:
-            case X86_INS_JNP:
-            case X86_INS_JNS:
-            case X86_INS_JO:
-            case X86_INS_JP:
-            case X86_INS_JRCXZ:
-            case X86_INS_JS:
-                exits.insert(I->address + I->size);
-                exits.insert(I->address + x86->disp);
-                break;
-                
-            case X86_INS_RET:
-                break;
-                
-            case X86_INS_JMP:
-            case X86_INS_CALL:
-                switch (x86->operands[0].type) {
-                    case X86_OP_MEM:
-                    case X86_OP_REG:
-                        break;
-                    case X86_OP_IMM:
-                        exits.insert(x86->operands[0].imm);
-                        break;
-                    default: std::abort();
-                }
-                
-            default:
-                exits.insert(I->address + I->size);
-                break;
-        }
-        
-        return exits;
     }
     
     bool has_multiple_exits() const {
@@ -109,14 +57,6 @@ struct Inst: Node {
             default:
                 return false;
         }
-    }
-    
-    virtual void add_to_trace(const ArchState& arch, const z3::model& model, TraceOut out) const override {
-        *out++ = I;
-    }
-    
-    virtual void print(std::ostream& os) const override {
-        std::cerr << "inst @ " << std::hex << I->address << " : "  << I->mnemonic << " " << I->op_str << "\n";
     }
     
 private:
