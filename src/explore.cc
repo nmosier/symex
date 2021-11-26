@@ -37,6 +37,7 @@ void Context::dump_trace(const z3::model& model) {
 
 
 void Context::explore_paths_rec(Program& program, const ArchState& in_arch, z3::solver& solver, addr_t addr, ByteMap write_mask) {
+    
     // add instructions until branch
     
     if (program.map.find(addr) == program.map.end()) {
@@ -71,6 +72,11 @@ void Context::explore_paths_rec(Program& program, const ArchState& in_arch, z3::
     }
     
     std::cerr << "inst @ " << std::hex << addr << " : "  << inst.I->mnemonic << " " << inst.I->op_str << "\n";
+    std::cerr << syms.map.size() << "\n";
+    
+    if (const auto *sym = syms.lookup(addr)) {
+        std::cerr << "sym " << *sym << "\n";
+    }
     
     I = inst.I;
     

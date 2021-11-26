@@ -2,7 +2,7 @@
 #include <fstream>
 #include <numeric>
 
-#include "capstone++.h"
+#include "util/capstone++.h"
 
 #include "x86.h"
 #include "config.h"

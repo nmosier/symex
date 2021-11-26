@@ -3,6 +3,7 @@
 #include <memory>
 #include <vector>
 #include <optional>
+#include <map>
 
 #include <z3++.h>
 
@@ -13,14 +14,36 @@
 #include "peephole.h"
 #include "cfg.h"
 #include "abstract.h"
+#include "core.h"
+#include "symbols.h"
 
 namespace x86 {
 
 class ArchState;
 
+struct Symbols {
+    using Map = std::map<uint64_t, std::string>;
+    Map map;
+    
+    Symbols() {}
+    
+    void add(const struct core& core);
+    
+    const std::string *lookup(uint64_t vmaddr) const {
+        auto it = map.upper_bound(vmaddr);
+        if (it == map.begin()) {
+            return nullptr;
+        }
+        --it;
+        return &it->second;
+    }
+};
+
 struct Context {
     z3::context ctx;
     cores::MachOCore core;
+    struct core core2;
+    Symbols syms;
     CoreProgram program;
     CFG cfg;
     
@@ -44,6 +67,11 @@ struct Context {
         core.parse();
         peepholes.push_back(std::make_unique<ReadEIP>());
         bind_abstract_transfers();
+        if (core_fopen(core_path.c_str(), &core2) < 0) {
+            core_perror("core_fopen");
+            std::exit(EXIT_FAILURE);
+        }
+        syms.add(core2);
     }
     
     static constexpr int max = 16;

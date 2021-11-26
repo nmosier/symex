@@ -1,7 +1,8 @@
 #pragma once
 
 #include <z3++.h>
-#include "capstone++.h"
+
+#include "util/capstone++.h"
 #include "archstate.h"
 
 namespace x86 {

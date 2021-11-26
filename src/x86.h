@@ -14,7 +14,8 @@
 
 #include <z3++.h>
 #include <capstone/capstone.h>
-#include "capstone++.h"
+
+#include "util/capstone++.h"
 
 extern csh g_handle;
 

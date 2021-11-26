@@ -7,7 +7,6 @@
 #include "x86.h"
 #include "inst.h"
 #include "program.h"
-#include "transfer.h"
 
 namespace x86 {
 
@@ -276,12 +275,12 @@ private:
     };
 };
 
-class CFG::Loop::Analysis2::Transfer: public ::Transfer {
+class CFG::Loop::Analysis2::Transfer {
 public:
     Transfer(const ArchState& in, const ArchState& out, const z3::expr& loop_pred): in(in), out(out), loop_pred(loop_pred) {}
     
 protected:
-    virtual bool transfer(x86::ArchState& arch, z3::solver& solver) const override;
+    bool transfer(x86::ArchState& arch, z3::solver& solver) const;
     
 private:
     ArchState in, out;
