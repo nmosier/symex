@@ -30,12 +30,38 @@ struct Symbols {
     void add(const struct core& core);
     
     const std::string *lookup(uint64_t vmaddr) const {
+        const auto it = find(vmaddr);
+        if (it == end()) {
+            return nullptr;
+        } else {
+            return &it->second;
+        }
+    }
+    
+    Map::const_iterator end() const {
+        return map.end();
+    }
+    
+    Map::const_iterator find(uint64_t vmaddr) const {
         auto it = map.upper_bound(vmaddr);
         if (it == map.begin()) {
-            return nullptr;
+            return map.end();
         }
         --it;
-        return &it->second;
+        return it;
+    }
+    
+    std::string desc(uint64_t vmaddr) const {
+        const auto it = find(vmaddr);
+        if (it == end()) {
+            char buf[16];
+            sprintf(buf, "%08llx", vmaddr);
+            return buf;
+        } else {
+            std::stringstream ss;
+            ss << it->second << "+" << (vmaddr - it->first);
+            return ss.str();
+        }
     }
 };
 

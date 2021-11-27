@@ -37,7 +37,9 @@ z3::expr ArchState::substitute(z3::expr& e, const ArchState& src, const ArchStat
     return e.substitute(srcs, dsts);
 }
 
-void ArchState::create(unsigned id, z3::solver& solver) {}
+void ArchState::create(unsigned id, z3::solver& solver) {
+    simplify();
+}
 
 // TODO: this is useless, currently
 z3::expr ArchState::operator==(const ArchState& other) const {

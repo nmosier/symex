@@ -251,14 +251,18 @@ OutputIt enumerate(z3::solver& solver, const z3::expr& x, OutputIt out) {
         const auto t0 = ::clock();
         const auto res = solver.check(v);
         const auto t1 = ::clock();
+#if 0
         std::cerr << "enumerate: " << res << " in " << (static_cast<float>(t1 - t0) / CLOCKS_PER_SEC) << "\n";
+#endif
         switch (res) {
             case z3::sat:
                 break;
             case z3::unsat:
                 return out;
             case z3::unknown:
+#if 0
                 std::cerr << __FUNCTION__ << ": unknown: " << solver.reason_unknown() << "\n";
+#endif
                 std::abort();
             default: std::abort();
         }

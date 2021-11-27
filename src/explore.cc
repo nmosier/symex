@@ -24,7 +24,9 @@ void Context::dump_trace(const z3::model& model) {
             const z3::expr addr = ctx.bv_val(sym_range.base + i, 32);
             v.push_back(init_mem[addr]);
         }
-        ofs << std::hex << sym_range.base << ":" << sym_range.len << " = " << model.eval(z3::concat(v), true) << "\n";
+        if (!v.empty()) {
+            ofs << std::hex << sym_range.base << ":" << sym_range.len << " = " << model.eval(z3::concat(v), true) << "\n";
+        }
     }
     
     /* print out instructions */
@@ -65,18 +67,14 @@ void Context::explore_paths_rec(Program& program, const ArchState& in_arch, z3::
     WriteVec writes;
     inst.transfer(arch, std::back_inserter(reads), std::back_inserter(writes));
     ArchState out_arch = arch;
-    out_arch.create(next_id++, solver);
+    // out_arch.create(next_id++, solver);
     
     if (writes.size() == 0) {
         assert(z3::eq(out_arch.mem.mem, in_arch.mem.mem));
     }
     
-    std::cerr << "inst @ " << std::hex << addr << " : "  << inst.I->mnemonic << " " << inst.I->op_str << "\n";
-    std::cerr << syms.map.size() << "\n";
-    
-    if (const auto *sym = syms.lookup(addr)) {
-        std::cerr << "sym " << *sym << "\n";
-    }
+
+    std::cerr << "inst @ " << syms.desc(addr) << " : "  << inst.I->mnemonic << " " << inst.I->op_str << "\n";
     
     I = inst.I;
     
@@ -121,6 +119,7 @@ void Context::explore_paths() {
         }
     }
     
+    
     // set return address
     in_arch.mem.write(in_arch.esp, ctx.bv_val(0x42424242, 32), util::null_output_iterator());
     for (uint64_t i = 0; i < 4; ++i) {
@@ -147,34 +146,43 @@ void Context::explore_paths() {
 
 
 void Context::explore_paths_rec_dst(Program& program, const ArchState& in_arch, const ArchState& out_arch, z3::solver& solver, const ByteMap& write_mask) {
-    unsigned count = 0;
-    while (true) {
-        const z3::check_result res = solver.check();
-        if (res != z3::sat) {
-            const auto core = solver.unsat_core();
-            for (const auto& e : core) {
-                std::cerr << e << "\n";
+        
+    if (out_arch.eip.simplify().is_numeral()) {
+        
+        explore_paths_rec(program, out_arch, solver, out_arch.eip.simplify().get_numeral_uint64(), write_mask);
+        
+    } else {
+        
+        unsigned count = 0;
+        while (true) {
+            const z3::check_result res = solver.check();
+            if (res != z3::sat) {
+                const auto core = solver.unsat_core();
+                for (const auto& e : core) {
+                    std::cerr << e << "\n";
+                }
+                break;
             }
-            break;
-        }
-
-        if (conf::deterministic && count > 0) {
-            std::cerr << "error: nondeterministic\n";
-            std::abort();
+            
+            if (conf::deterministic && count > 0) {
+                std::cerr << "error: nondeterministic\n";
+                std::abort();
+            }
+            
+            const z3::model model = solver.get_model();
+            const z3::expr eip = model.eval(out_arch.eip, true);
+            // std::cerr << "dst " << eip << "\n";
+            
+            solver.push();
+            {
+                solver.add(eip == out_arch.eip);
+                explore_paths_rec(program, out_arch, solver, eip.get_numeral_uint64(), write_mask);
+            }
+            solver.pop();
+            solver.add(eip != out_arch.eip);
+            ++count;
         }
         
-        const z3::model model = solver.get_model();
-        const z3::expr eip = model.eval(out_arch.eip);
-        std::cerr << "dst " << eip << "\n";
-         
-        solver.push();
-        {
-            solver.add(eip == out_arch.eip);
-            explore_paths_rec(program, out_arch, solver, eip.get_numeral_uint64(), write_mask);
-        }
-        solver.pop();
-        solver.add(eip != out_arch.eip);
-        ++count;
     }
 }
 
@@ -186,46 +194,69 @@ void Context::explore_paths_rec_read(Program& program, const ArchState& in_arch,
     }
     
     const auto& sym_read = *read_it;
-    
-    unsigned count = 0;
-    while (true) {
-        const z3::check_result res = solver.check();
-        if (res != z3::sat) {
-            break;
-        }
-        if (count > 0) {
-            std::cerr << "error: nondeterministic\n";
-            std::abort();
-        }
-        const z3::model model = solver.get_model();
 
-        MemState::Read con_read = sym_read.eval(model);
-        const auto olddata = con_read.data;
-        con_read.data = sym_read.data; // NOTE: this fixes bug maybe?
+    std::vector<z3::expr> vec;
+    z3::enumerate(solver, sym_read.addr, std::back_inserter(vec));
+    assert(!vec.empty());
+    
+    if (vec.size() == 1) {
+        
+        Read con_read {vec.front(), sym_read.data};
         con_read.data = con_read(core, write_mask);
-        
-        std::cerr << "read " << con_read.addr << " " << model.eval(con_read.data) << " (" << olddata << ")\n";
-        
+#if 0
+        solver.add(sym_read.data == con_read.data);
+#else
         {
-            const z3::scope scope {solver};
-            solver.add(con_read == sym_read);
-            
-#if 1
-            // EXPERIMENTAL: replace expression
-            {
-                z3::expr_vector src(ctx);
-                z3::expr_vector dst(ctx);
-                src.push_back(sym_read.addr); dst.push_back(con_read.addr);
-                src.push_back(sym_read.data); dst.push_back(con_read.data);
-                
-                out_arch.substitute(src, dst);
-            }
-#endif
-            
-            explore_paths_rec_read(program, in_arch, out_arch, solver, write_mask, reads, writes, std::next(read_it));
+            z3::expr_vector src {ctx}, dst {ctx};
+            src.push_back(sym_read.data); dst.push_back(con_read.data);
+            out_arch.substitute(src, dst);
         }
-        solver.add(con_read.addr != sym_read.addr);
-        ++count;
+#endif
+        explore_paths_rec_read(program, in_arch, out_arch, solver, write_mask, reads, writes, std::next(read_it));
+        
+    } else {
+        
+        unsigned count = 0;
+        while (true) {
+            const z3::check_result res = solver.check();
+            if (res != z3::sat) {
+                break;
+            }
+            if (count > 0) {
+                std::cerr << "error: nondeterministic\n";
+                std::abort();
+            }
+            const z3::model model = solver.get_model();
+            
+            MemState::Read con_read = sym_read.eval(model);
+            const auto olddata = con_read.data;
+            con_read.data = sym_read.data; // NOTE: this fixes bug maybe?
+            con_read.data = con_read(core, write_mask);
+            
+            std::cerr << "read " << con_read.addr << " " << model.eval(con_read.data) << " (" << olddata << ")\n";
+            
+            {
+                const z3::scope scope {solver};
+                solver.add(con_read == sym_read);
+                
+#if 1
+                // EXPERIMENTAL: replace expression
+                {
+                    z3::expr_vector src(ctx);
+                    z3::expr_vector dst(ctx);
+                    src.push_back(sym_read.addr); dst.push_back(con_read.addr);
+                    src.push_back(sym_read.data); dst.push_back(con_read.data);
+                    
+                    out_arch.substitute(src, dst);
+                }
+#endif
+                
+                explore_paths_rec_read(program, in_arch, out_arch, solver, write_mask, reads, writes, std::next(read_it));
+            }
+            solver.add(con_read.addr != sym_read.addr);
+            ++count;
+        }
+        
     }
 }
 
@@ -238,34 +269,50 @@ void Context::explore_paths_rec_write(Program& program, const ArchState& in_arch
     const auto& sym_write = *write_it;
     
     // DEBUG: check for misaligned writes
+    std::vector<z3::expr> vec;
+    z3::enumerate(solver, sym_write.addr, std::back_inserter(vec));
+    assert(!vec.empty());
     
-    unsigned count = 0;
-    while (true) {
-        const z3::check_result res = solver.check();
-        if (res != z3::sat) {
-            break;
-        }
-        if (count > 0) {
-            std::cerr << "error: nondeterministic\n";
-            std::abort();
-        }
-        const z3::model model = solver.get_model();
-        MemState::Write con_write = sym_write.eval(model);
-        std::cerr << "write " << con_write.addr << " " << con_write.data << "\n";
+    if (vec.size() == 1) {
         
-        solver.push();
-        {
-            solver.add(con_write.addr == sym_write.addr);
-            ByteMap new_write_mask = write_mask;
-            for (std::size_t i = 0; i < sym_write.size(); ++i) {
-                new_write_mask.insert(con_write.addr.get_numeral_uint64() + i);
+        Write con_write {vec.front(), sym_write.data};
+        ByteMap new_write_mask = write_mask;
+        for (std::size_t i = 0; i < sym_write.size(); ++i) {
+            new_write_mask.insert(con_write.addr.get_numeral_uint64() + i);
+        }
+        explore_paths_rec_write(program, in_arch, out_arch, solver, new_write_mask, writes, std::next(write_it));
+        
+    } else {
+        
+        unsigned count = 0;
+        while (true) {
+            const z3::check_result res = solver.check();
+            if (res != z3::sat) {
+                break;
             }
-            explore_paths_rec_write(program, in_arch, out_arch, solver, new_write_mask, writes, std::next(write_it));
+            if (count > 0) {
+                std::cerr << "error: nondeterministic\n";
+                std::abort();
+            }
+            const z3::model model = solver.get_model();
+            MemState::Write con_write = sym_write.eval(model);
+            std::cerr << "write " << con_write.addr << " " << con_write.data << "\n";
+            
+            solver.push();
+            {
+                solver.add(con_write.addr == sym_write.addr);
+                ByteMap new_write_mask = write_mask;
+                for (std::size_t i = 0; i < sym_write.size(); ++i) {
+                    new_write_mask.insert(con_write.addr.get_numeral_uint64() + i);
+                }
+                explore_paths_rec_write(program, in_arch, out_arch, solver, new_write_mask, writes, std::next(write_it));
+            }
+            solver.pop();
+            
+            solver.add(sym_write.addr != con_write.addr);
+            ++count;
         }
-        solver.pop();
         
-        solver.add(sym_write.addr != con_write.addr);
-        ++count;
     }
 }
 
