@@ -62,11 +62,12 @@ void Inst::transfer(ArchState& arch, ReadOut read_out, WriteOut write_out) const
         case X86_INS_JMP:
         case X86_INS_PCMPEQB:
         case X86_INS_SHL:
-            case X86_INS_PMOVMSKB:
+        case X86_INS_PMOVMSKB:
         case X86_INS_BSF:
         case X86_INS_NOP:
         case X86_INS_CMOVS:
         case X86_INS_CMOVB:
+        case X86_INS_CMOVE:
         case X86_INS_JB:
         case X86_INS_JA:
         case X86_INS_SHR:
@@ -83,6 +84,8 @@ void Inst::transfer(ArchState& arch, ReadOut read_out, WriteOut write_out) const
         case X86_INS_JL:
         case X86_INS_BT:
         case X86_INS_JAE:
+        case X86_INS_CMPXCHG:
+        case X86_INS_XCHG:
             break;
             
         default: unimplemented("of %s", I->mnemonic);
@@ -145,11 +148,13 @@ void Inst::transfer(ArchState& arch, ReadOut read_out, WriteOut write_out) const
         }
             
         case X86_INS_CMOVS:
-        case X86_INS_CMOVB: {
+        case X86_INS_CMOVB:
+        case X86_INS_CMOVE: {
             using K = Condition::Kind;
             static const std::unordered_map<unsigned, Condition::Kind> cond_map = {
                 {X86_INS_CMOVS, K::S},
                 {X86_INS_CMOVB, K::B},
+                {X86_INS_CMOVE, K::E},
             };
             const Condition cond {cond_map.at(I->id)};
             const Operand dst_op {x86->operands[0]};
@@ -329,6 +334,45 @@ void Inst::transfer(ArchState& arch, ReadOut read_out, WriteOut write_out) const
             const z3::expr src = src_op.read(arch, read_out);
             const z3::expr bit = bit_op.read(arch, read_out);
             arch.cf = z3::lshr(src, bit).extract(0, 0);
+            break;
+        }
+            
+        case X86_INS_CMPXCHG: {
+            assert(x86->op_count == 2);
+            const unsigned size = x86->operands[0].size;
+            const MemoryOperand mem_op {x86->operands[0].mem};
+            const Register reg_op {x86->operands[1].reg};
+            const z3::expr mem_val = mem_op.read(arch, size, read_out);
+            x86_reg acc_reg;
+            switch (size) {
+                case 1:
+                    acc_reg = X86_REG_AL;
+                    break;
+                case 2:
+                    acc_reg = X86_REG_AX;
+                    break;
+                case 4:
+                    acc_reg = X86_REG_EAX;
+                    break;
+                default: std::abort();
+            }
+            const Register acc_op {acc_reg};
+            const z3::expr acc_val = acc_op.read(arch);
+            const z3::expr eq = (mem_val == acc_val);
+            arch.zf = z3::bool_to_bv(eq);
+            mem_op.write(arch, z3::ite(eq, reg_op.read(arch), mem_val), write_out);
+            acc_op.write(arch, z3::ite(eq, acc_val, mem_val));
+            break;
+        }
+            
+        case X86_INS_XCHG: {
+            assert(x86->op_count == 2);
+            const Operand op1 {x86->operands[0]};
+            const Operand op2 {x86->operands[1]};
+            const z3::expr val1 = op1.read(arch, read_out);
+            const z3::expr val2 = op2.read(arch, read_out);
+            op1.write(arch, val2, write_out);
+            op2.write(arch, val1, write_out);
             break;
         }
             
