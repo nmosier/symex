@@ -1,6 +1,8 @@
 #pragma once
 
 #include <unordered_set>
+#include <unordered_map>
+#include <map>
 
 #include <z3++.h>
 
@@ -102,16 +104,44 @@ void MemState::write(const z3::expr& address, const z3::expr& value, OutputIt wr
 #endif
 
 
-
+struct Mask {
+    static inline constexpr uint64_t pagesize = 4096;
+    static inline constexpr uint64_t pagemask = pagesize - 1;
+    
+    using value_type = uint64_t;
+    
+    using Map = std::unordered_map<value_type, std::array<bool, pagesize>>;
+    Map map;
+    
+    bool insert(value_type x) {
+        bool& b = map[key(x)][value(x)];
+        const bool res = b;
+        b = true;
+        return res;
+    }
+    
+private:
+    
+    static value_type key(value_type x) {
+        return x & ~pagemask;
+    }
+    static value_type value(value_type x) {
+        return x & pagemask;
+    }
+};
 
 
 
 struct MemState {
     cores::Core& core;
-    // using Map = std::unordered_map<uint64_t, z3::expr>;
-    // Map con_mem;
-    z3::expr mem;
-    std::unordered_set<uint64_t> init;
+    using Map = std::unordered_map<uint64_t, z3::expr>;
+    Map con_mem;
+    z3::expr sym_mem;
+#if 0
+    using Mask = std::unordered_set<uint64_t>;
+#endif
+    Mask init;
+    Mask sym_writes;
     
     struct Access {
         z3::expr addr;
@@ -147,8 +177,6 @@ struct MemState {
     
     struct Read: Access {
         Read eval(const z3::model& model) const { return Read {Access::eval(model)}; }
-        
-        z3::expr operator()(const cores::Core& core, const ByteMap& write_mask) const { return data; }
     };
     
     struct Write: Access {
@@ -159,16 +187,20 @@ struct MemState {
     MemState(z3::context& ctx, cores::Core& core);
     
     z3::context& ctx() const {
-        return mem.ctx();
+        return sym_mem.ctx();
     }
     
     z3::expr read(const z3::expr& addr, unsigned size, z3::solver& solver);
     void write(const z3::expr& addr, const z3::expr& value, z3::solver& solver);
+    void symbolic(uint64_t begin, uint64_t end);
     
     static z3::expr get_init_mem(z3::context& ctx);
     
 private:
-    void initialize(const z3::expr& sym_addr, unsigned size, z3::solver& solver);
+    std::vector<z3::expr> initialize(const z3::expr& sym_addr, unsigned size, z3::solver& solver);
+    
+    z3::expr read_byte(const z3::expr& sym_addr, const std::vector<z3::expr>& con_addrs);
+    void write_byte(const z3::expr& sym_addr, const std::vector<z3::expr>& con_addrs, const z3::expr& sym_data);
 };
 
 

@@ -23,7 +23,7 @@ void ArchState::symbolic() {
 #define ENT(name, bits, ...) name = ctx().bv_const(#name, bits);
     X_x86_ALL(ENT, ENT);
 #undef ENT
-    mem.mem = ctx().constant("tmpmem", ctx().array_sort(ctx().bv_sort(32), ctx().bv_sort(8)));
+    mem.sym_mem = ctx().constant("tmpmem", ctx().array_sort(ctx().bv_sort(32), ctx().bv_sort(8)));
 }
 
 z3::expr ArchState::substitute(z3::expr& e, const ArchState& src, const ArchState& dst) {
@@ -55,7 +55,7 @@ void ArchState::transform_expr(std::function<z3::expr (const z3::expr&)> f) {
     X_x86_ALL(ENT, ENT);
 #undef ENT
     
-    mem.mem = f(mem.mem);
+    mem.sym_mem = f(mem.sym_mem);
 }
 
 #if 0

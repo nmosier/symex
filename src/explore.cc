@@ -115,9 +115,7 @@ void Context::explore_paths() {
     // TODO: restore xmms too
     
     for (const auto& range : symbolic_ranges) {
-        for (uint64_t addr = range.base; addr < range.base + range.len; ++addr) {
-            in_arch.mem.init.insert(addr);
-        }
+        in_arch.mem.symbolic(range.base, range.base + range.len);
     }
     
     // set return address

@@ -39,7 +39,7 @@ void ret(x86::ArchState& arch, const z3::expr& rv, z3::solver& solver) {
 z3::expr strlen(const x86::ArchState& arch, const z3::expr& addr, z3::solver& solver) {
     static unsigned id = 0;
     z3::context& ctx = arch.ctx();
-    const z3::expr& mem = arch.mem.mem;
+    const z3::expr& mem = arch.mem.sym_mem;
     
     const z3::expr len = ctx.bv_const(util::to_string("strlen", id++).c_str(), 32);
     const z3::expr idx = ctx.bv_const("idx", 32);
@@ -65,7 +65,7 @@ z3::expr strnlen(const x86::ArchState& arch, const z3::expr& addr, const z3::exp
 /// returns new memory array
 z3::expr memcpy(const x86::ArchState& arch, const z3::expr& dst, const z3::expr& src, const z3::expr& len) {
     z3::context& ctx = arch.ctx();
-    const z3::expr& mem = arch.mem.mem;
+    const z3::expr& mem = arch.mem.sym_mem;
     
     z3::expr addr = ctx.bv_const("addr", 32);
     const z3::expr adjusted_addr = z3::ite(addr >= dst && addr < dst + len, addr - dst + src, addr);
@@ -81,7 +81,7 @@ z3::expr strncasecmp(const x86::ArchState& arch, const z3::expr& s1, const z3::e
     static unsigned id = 0;
     
     z3::context& ctx = arch.ctx();
-    const z3::expr& mem = arch.mem.mem;
+    const z3::expr& mem = arch.mem.sym_mem;
     
     const uint64_t con_s1 = s1.get_numeral_uint64();
     const uint64_t con_s2 = s2.get_numeral_uint64();
@@ -177,7 +177,7 @@ void sym_memcpy(x86::ArchState& arch, z3::solver& solver) {
     z3::expr len {ctx};
     args(arch, solver, dst, src, len);
     
-    arch.mem.mem = memcpy(arch, dst, src, len);
+    arch.mem.sym_mem = memcpy(arch, dst, src, len);
     
     /* return address */
     ret(arch, dst, solver);
@@ -186,7 +186,7 @@ void sym_memcpy(x86::ArchState& arch, z3::solver& solver) {
 
 void sym_strncat(x86::ArchState& arch, z3::solver& solver) {
     z3::context& ctx = arch.ctx();
-    z3::expr mem = arch.mem.mem;
+    z3::expr mem = arch.mem.sym_mem;
     
     z3::expr dst {ctx}, src {ctx}, len {ctx};
     args(arch, solver, dst, src, len);
@@ -203,7 +203,7 @@ void sym_strncat(x86::ArchState& arch, z3::solver& solver) {
 
 void sym_strnlen(x86::ArchState& arch, z3::solver& solver) {
     z3::context& ctx = arch.ctx();
-    z3::expr mem = arch.mem.mem;
+    z3::expr mem = arch.mem.sym_mem;
     
     z3::expr src {ctx};
     z3::expr maxlen {ctx};
