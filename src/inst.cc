@@ -104,6 +104,10 @@ void Inst::transfer(ArchState& arch, ReadOut read_out, WriteOut write_out) const
         case X86_INS_FILD:
         case X86_INS_FMUL:
         case X86_INS_CMOVNE:
+        case X86_INS_CMOVGE:
+        case X86_INS_SAR:
+        case X86_INS_FLDZ:
+        case X86_INS_FXCH:
             break;
             
         default: unimplemented("of %s", I->mnemonic);
@@ -175,7 +179,8 @@ void Inst::transfer(ArchState& arch, ReadOut read_out, WriteOut write_out) const
         case X86_INS_CMOVB:
         case X86_INS_CMOVE:
         case X86_INS_CMOVA:
-        case X86_INS_CMOVNE: {
+        case X86_INS_CMOVNE:
+        case X86_INS_CMOVGE: {
             using K = Condition::Kind;
             static const std::unordered_map<unsigned, Condition::Kind> cond_map = {
                 {X86_INS_CMOVS,  K::S},
@@ -183,6 +188,7 @@ void Inst::transfer(ArchState& arch, ReadOut read_out, WriteOut write_out) const
                 {X86_INS_CMOVE,  K::E},
                 {X86_INS_CMOVA,  K::A},
                 {X86_INS_CMOVNE, K::NE},
+                {X86_INS_CMOVGE, K::GE},
             };
             const Condition cond {cond_map.at(I->id)};
             const Operand dst_op {x86->operands[0]};
@@ -314,6 +320,7 @@ void Inst::transfer(ArchState& arch, ReadOut read_out, WriteOut write_out) const
             
         case X86_INS_SHR:
         case X86_INS_SHL:
+        case X86_INS_SAR:
             transfer_shift(I->id, arch, ctx, read_out, write_out);
             break;
             
@@ -470,6 +477,23 @@ void Inst::transfer(ArchState& arch, ReadOut read_out, WriteOut write_out) const
             const z3::expr src_fp_val = arch.fpu.to_fp(src_bv_val);
             const z3::expr res = acc.read(arch) * src_fp_val;
             acc.write(arch, res);
+            break;
+        }
+            
+        case X86_INS_FLDZ: {
+            assert(x86->op_count == 0);
+            arch.fpu.push(arch.fpu.to_fp(ctx.fpa_val(0.)));
+            break;
+        }
+            
+        case X86_INS_FXCH: {
+            assert(x86->op_count == 1);
+            const Operand op1 {x86->operands[0]};
+            const Register op2 {X86_REG_ST0};
+            const z3::expr val1 = op1.read(arch, read_out);
+            const z3::expr val2 = op2.read(arch);
+            op1.write(arch, val2, write_out);
+            op2.write(arch, val1);
             break;
         }
             
@@ -727,7 +751,13 @@ void Inst::transfer_shift(unsigned id, ArchState& arch, z3::context& ctx, ReadOu
             arch.of = z3::bvsign(acc);
             break;
             
-        default: std::abort();
+        case X86_INS_SAR:
+            res = z3::ashr(acc, shift);
+            arch.cf = z3::ashr(acc, shift - 1).extract(0, 0);
+            arch.of = ctx.bv_val(0, 1);
+            break;
+            
+        default: unimplemented("shift %s", I->op_str);
     }
     
     arch.sf = z3::bvsign(res);
