@@ -30,6 +30,7 @@ void usage(FILE *f = stderr) {
 Options:
  -h               show help
  -s <addr>,<len>  make memory range symbolic
+ -e <entrypoint>  override entrypoint (eip)
 )=";
     fprintf(f, s, prog);
 }
@@ -47,7 +48,7 @@ int main(int argc, char *argv[]) {
     prog = argv[0];
     
     int optc;
-    while ((optc = getopt(argc, argv, "hs:")) >= 0) {
+    while ((optc = getopt(argc, argv, "hs:e:")) >= 0) {
         switch (optc) {
             case 'h':
                 usage(stdout);
@@ -61,6 +62,15 @@ int main(int argc, char *argv[]) {
                 range.len = parse_uint64(len_s);
                 conf::symbolic_ranges.push_back(range);
                 conf::deterministic = false;
+                break;
+            }
+            case 'e': {
+                char *end;
+                conf::entrypoint = std::strtoul(optarg, &end, 0);
+                if (*optarg == '\0' || *end != '\0') {
+                    std::cerr << prog << ": -e: bad argument\n";
+                    return EXIT_FAILURE;
+                }       
                 break;
             }
             default:
@@ -81,7 +91,6 @@ int main(int argc, char *argv[]) {
     
     x86::Context ctx {core};
     ctx.symbolic_ranges = conf::symbolic_ranges;
-    
     
     assert(ctx.core.thread(0).flavor == x86_THREAD_STATE32);
     

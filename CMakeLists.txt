@@ -13,5 +13,7 @@ set(Z3_INCLUDE_DIRS /opt/homebrew/include)
 
 set(CMAKE_CXX_STANDARD 20 REQUIRED)
 
+add_link_options(-w) # no linker warnings
+
 add_subdirectory(cores)
 add_subdirectory(src)

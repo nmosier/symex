@@ -1,6 +1,7 @@
 #pragma once
 
 #include "memstate.h"
+#include "fpu.h"
 
 namespace x86 {
 
@@ -46,6 +47,7 @@ struct ArchState {
     static constexpr unsigned xmm_bits = 128;
     
     MemState mem;
+    FPUState fpu;
     
     ArchState(z3::context& ctx);
     

@@ -76,7 +76,7 @@ struct Context {
     std::vector<MemoryRange> symbolic_ranges;
     std::vector<std::unique_ptr<Peephole>> peepholes;
     std::vector<const cs_insn *> trace;
-    std::unordered_map<addr_t, transfer::transfer_function_t> transfers;
+    std::unordered_map<addr_t, transfer::transfer_function_t *> transfers;
     
     ~Context() { std::cerr << "trace " << trace.size() << "\n"; }
     
@@ -157,6 +157,7 @@ struct Context {
         transfers.emplace(0xa7de7e09, transfer::sym_strnlen);
         //transfers.emplace(0x)
 #endif
+        transfers.emplace(0xa7ca0a18, transfer::sym_strncasecmp);
     }
 };
 

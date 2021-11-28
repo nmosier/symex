@@ -13,7 +13,7 @@ std::ostream& operator<<(std::ostream& os, const ArchState& arch) {
 #define ENT_(name, ...) name(ctx)
 #define ENT(name, ...) ENT_(name),
 ArchState::ArchState(z3::context& ctx):
-X_x86_ALL(ENT, ENT_), mem(ctx) {
+X_x86_ALL(ENT, ENT_), mem(ctx), fpu(ctx) {
     zero(); // TODO: disable this
 }
 #undef ENT_

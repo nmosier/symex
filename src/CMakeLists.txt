@@ -23,6 +23,7 @@ add_executable(x86-test
   util.h
   abstract.h abstract.cc
   config.cc config.h
+  fpu.cc fpu.h
   $<TARGET_OBJECTS:cores_old>
   )
 target_link_libraries(x86-test PRIVATE cores)

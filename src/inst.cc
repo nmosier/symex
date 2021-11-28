@@ -19,6 +19,7 @@ const char *Condition::str() const {
         case LE: return "LE";
         case L:  return "L";
         case AE: return "AE";
+        case BE: return "BE";
         default: unimplemented("cc %d", kind);
     }
 }
@@ -36,6 +37,7 @@ z3::expr Condition::operator()(const ArchState& arch) const {
         case LE: return arch.zf == 1 || arch.sf != arch.of;
         case L:  return arch.sf != arch.of;
         case AE: return arch.cf == 0;
+        case BE: return (arch.cf | arch.zf) == 1;
         default: unimplemented("cc %s", str());
     }
 }
@@ -86,6 +88,22 @@ void Inst::transfer(ArchState& arch, ReadOut read_out, WriteOut write_out) const
         case X86_INS_JAE:
         case X86_INS_CMPXCHG:
         case X86_INS_XCHG:
+        case X86_INS_JBE:
+        case X86_INS_NEG:
+        case X86_INS_CMOVA:
+        case X86_INS_MOVDQU:
+        case X86_INS_MOVQ:
+        case X86_INS_PSRLDQ:
+        case X86_INS_MOVD:
+        case X86_INS_SBB:
+        case X86_INS_NOT:
+        case X86_INS_CWDE:
+        case X86_INS_IMUL:
+        case X86_INS_FLD:
+        case X86_INS_FSTP:
+        case X86_INS_FILD:
+        case X86_INS_FMUL:
+        case X86_INS_CMOVNE:
             break;
             
         default: unimplemented("of %s", I->mnemonic);
@@ -99,14 +117,16 @@ void Inst::transfer(ArchState& arch, ReadOut read_out, WriteOut write_out) const
     switch (I->id) {
         case X86_INS_NOP:
             break;
+            
         case X86_INS_NEG: {
-            const cs_x86_op& op = I->detail->x86.operands[0];
-            const Operand op2 {op};
-            const z3::expr res = -op2.read(arch, read_out);
-            op2.write(arch, res, write_out);
-            arch.cf = z3::bvredor(res);
+            const Operand op {I->detail->x86.operands[0]};
+            const z3::expr zero = ctx.bv_val(0, op.bits());
+            op.write(arch,
+                     transfer_acc_src_arith(X86_INS_SUB, arch, ctx, zero, op.read(arch, read_out), op.bits()),
+                     write_out);
             break;
         }
+
         case X86_INS_NOT: {
             const cs_x86_op& op = I->detail->x86.operands[0];
             const Operand op2 {op};
@@ -126,7 +146,11 @@ void Inst::transfer(ArchState& arch, ReadOut read_out, WriteOut write_out) const
             transfer_acc_src(arch, read_out, write_out);
             break;
             
-        case X86_INS_MOV: {
+        case X86_INS_MOV:
+        case X86_INS_MOVD:
+        case X86_INS_MOVQ:
+        case X86_INS_MOVDQU: {
+            assert(x86->op_count == 2);
             const Operand dst {x86->operands[0]};
             const Operand src {x86->operands[1]};
             dst.write(arch, src.read(arch, read_out), write_out);
@@ -149,12 +173,16 @@ void Inst::transfer(ArchState& arch, ReadOut read_out, WriteOut write_out) const
             
         case X86_INS_CMOVS:
         case X86_INS_CMOVB:
-        case X86_INS_CMOVE: {
+        case X86_INS_CMOVE:
+        case X86_INS_CMOVA:
+        case X86_INS_CMOVNE: {
             using K = Condition::Kind;
             static const std::unordered_map<unsigned, Condition::Kind> cond_map = {
-                {X86_INS_CMOVS, K::S},
-                {X86_INS_CMOVB, K::B},
-                {X86_INS_CMOVE, K::E},
+                {X86_INS_CMOVS,  K::S},
+                {X86_INS_CMOVB,  K::B},
+                {X86_INS_CMOVE,  K::E},
+                {X86_INS_CMOVA,  K::A},
+                {X86_INS_CMOVNE, K::NE},
             };
             const Condition cond {cond_map.at(I->id)};
             const Operand dst_op {x86->operands[0]};
@@ -255,6 +283,7 @@ void Inst::transfer(ArchState& arch, ReadOut read_out, WriteOut write_out) const
         case X86_INS_JLE:
         case X86_INS_JS:
         case X86_INS_JL:
+        case X86_INS_JBE:
             transfer_jcc(arch, ctx, read_out, write_out);
             eip = arch.eip;
             break;
@@ -283,13 +312,14 @@ void Inst::transfer(ArchState& arch, ReadOut read_out, WriteOut write_out) const
             break;
         }
             
-        case X86_INS_CMOVA:
-            transfer_cmovcc(arch, ctx, read_out, write_out);
-            break;
-            
         case X86_INS_SHR:
         case X86_INS_SHL:
-            transfer_shift(arch, ctx, read_out, write_out);
+            transfer_shift(I->id, arch, ctx, read_out, write_out);
+            break;
+            
+        case X86_INS_PSRLDQ:
+            assert(x86->op_count == 2);
+            transfer_shift(X86_INS_SHR, arch, ctx, read_out, write_out);
             break;
             
         case X86_INS_MOVSB:
@@ -323,7 +353,7 @@ void Inst::transfer(ArchState& arch, ReadOut read_out, WriteOut write_out) const
             
             acc_op.write(arch, res, write_out);
             const unsigned hi = acc_op.bits() - 1;
-            arch.zf = ~z3::bvredor(acc);
+            arch.zf = ~z3::bvredor(res);
             arch.sf = acc.extract(hi, hi);
             break;
         }
@@ -332,7 +362,11 @@ void Inst::transfer(ArchState& arch, ReadOut read_out, WriteOut write_out) const
             const Operand src_op {x86->operands[0]};
             const Operand bit_op {x86->operands[1]};
             const z3::expr src = src_op.read(arch, read_out);
-            const z3::expr bit = bit_op.read(arch, read_out);
+            z3::expr bit = bit_op.read(arch, read_out);
+            assert(bit_op.size() <= src_op.size());
+            if (bit_op.size() < src_op.size()) {
+                bit = z3::zext(bit, src_op.bits() - bit_op.bits());
+            }
             arch.cf = z3::lshr(src, bit).extract(0, 0);
             break;
         }
@@ -376,11 +410,74 @@ void Inst::transfer(ArchState& arch, ReadOut read_out, WriteOut write_out) const
             break;
         }
             
+        case X86_INS_SBB: {
+            assert(x86->op_count == 2);
+            const Operand src_op {x86->operands[1]};
+            const Operand acc_op {x86->operands[0]};
+            const z3::expr src = src_op.read(arch, read_out);
+            const z3::expr acc = acc_op.read(arch, read_out);
+            const z3::expr carry = z3::zext(arch.cf, acc_op.bits() - 1);
+            const z3::expr res = transfer_acc_src_arith(X86_INS_SUB, arch, ctx, acc, src + carry, acc_op.bits());
+            acc_op.write(arch, res, write_out);
+            break;
+        }
+            
+        case X86_INS_CWDE: {
+            assert(x86->op_count == 0);
+            const Register src {X86_REG_AX};
+            const Register dst {X86_REG_EAX};
+            const z3::expr val = z3::sext(src.read(arch), 16);
+            dst.write(arch, val);
+            break;
+        }
+            
+        case X86_INS_FLD: {
+            assert(x86->op_count == 1);
+            const auto& op = x86->operands[0];
+            assert(op.type != X86_OP_IMM);
+            const Operand src {op};
+            const z3::expr val = src.read(arch, read_out);
+            arch.fpu.push(val);
+            break;
+        }
+            
+        case X86_INS_FSTP: {
+            assert(x86->op_count == 1);
+            const auto& op = x86->operands[0];
+            assert(op.type != X86_OP_IMM);
+            const Operand dst {op};
+            const z3::expr fp_val = arch.fpu.get(0);
+            const z3::expr bv_val = arch.fpu.to_bv(fp_val, dst.bits());
+            dst.write(arch, bv_val, write_out);
+            arch.fpu.pop();
+            break;
+        }
+            
+        case X86_INS_FILD: {
+            assert(x86->op_count == 1);
+            const Operand src {x86->operands[0]};
+            const z3::expr int_val = src.read(arch, read_out);
+            const z3::expr fp_val = z3::sbv_to_fpa(int_val, arch.fpu.fp_sort());
+            arch.fpu.push(fp_val);
+            break;
+        }
+            
+        case X86_INS_FMUL: {
+            assert(x86->op_count == 1);
+            const Register acc {X86_REG_ST0};
+            const Operand src {x86->operands[0]};
+            const z3::expr src_bv_val = src.read(arch, read_out);
+            const z3::expr src_fp_val = arch.fpu.to_fp(src_bv_val);
+            const z3::expr res = acc.read(arch) * src_fp_val;
+            acc.write(arch, res);
+            break;
+        }
+            
         default: unimplemented("%s", I->mnemonic);
     }
     
     if (!eip) {
-        eip = arch.eip + I->size;
+        eip = (arch.eip + I->size).simplify();
     }
     arch.eip = *eip;
 }
@@ -423,7 +520,8 @@ z3::expr Inst::transfer_acc_src_logic(unsigned id, ArchState& arch, z3::context&
             res = acc & src;
             break;
         case X86_INS_OR:
-            res = acc | src;
+            res = (acc | src);
+            res = (acc | src);
             break;
         case X86_INS_XOR:
         case X86_INS_PXOR:
@@ -532,6 +630,7 @@ void Inst::transfer_imul(ArchState& arch, z3::context& ctx, ReadOut read_out, Wr
             z3::expr res = src * imm;
             dst_op.write(arch, res.extract(src_sz - 1, 0), write_out);
             arch.cf = res.extract(res_sz - 1, res_sz - 1) ^ res.extract(src_sz - 1, src_sz - 1);
+            arch.of = arch.cf;
             break;
         }
             
@@ -559,6 +658,7 @@ void Inst::transfer_jcc(ArchState& arch, z3::context& ctx, ReadOut read_out, Wri
         {X86_INS_JS,  K::S},
         {X86_INS_JL,  K::L},
         {X86_INS_JAE, K::AE},
+        {X86_INS_JBE, K::BE},
     };
     const Condition cond {cond_map.at(I->id)};
     
@@ -605,7 +705,7 @@ void Inst::transfer_string_rep(ArchState& arch, z3::context& ctx, ReadOut read_o
     }
 }
 
-void Inst::transfer_shift(ArchState& arch, z3::context& ctx, ReadOut read_out, WriteOut write_out) const {
+void Inst::transfer_shift(unsigned id, ArchState& arch, z3::context& ctx, ReadOut read_out, WriteOut write_out) const {
     assert(x86->op_count == 2);
     const Operand acc_op {x86->operands[0]};
     const Operand shift_op {x86->operands[1]};
@@ -614,7 +714,7 @@ void Inst::transfer_shift(ArchState& arch, z3::context& ctx, ReadOut read_out, W
     assert(acc.get_sort().bv_size() >= shift.get_sort().bv_size());
     shift = z3::zext(shift, acc.get_sort().bv_size() - shift.get_sort().bv_size());
     z3::expr res {ctx};
-    switch (I->id) {
+    switch (id) {
         case X86_INS_SHL:
             res = z3::shl(acc, shift);
             arch.cf = z3::bvsign(z3::shl(acc, shift - 1));
@@ -626,6 +726,8 @@ void Inst::transfer_shift(ArchState& arch, z3::context& ctx, ReadOut read_out, W
             arch.cf = z3::lshr(acc, shift - 1).extract(0, 0);
             arch.of = z3::bvsign(acc);
             break;
+            
+        default: std::abort();
     }
     
     arch.sf = z3::bvsign(res);

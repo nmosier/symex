@@ -84,10 +84,15 @@ z3::expr Register::read(const ArchState& arch) const {
         case X86_REG_ESP: return arch.esp;
             
         case X86_REG_AX: return arch.eax.extract(15, 0);
+        case X86_REG_CX: return arch.ecx.extract(15, 0);
+        case X86_REG_DX: return arch.edx.extract(15, 0);
             
         case X86_REG_AL: return arch.eax.extract(7, 0);
         case X86_REG_BL: return arch.ebx.extract(7, 0);
         case X86_REG_CL: return arch.ecx.extract(7, 0);
+        case X86_REG_DL: return arch.edx.extract(7, 0);
+            
+        case X86_REG_DH: return arch.edx.extract(15, 8);
             
         case X86_REG_XMM0: return arch.xmm0;
         case X86_REG_XMM1: return arch.xmm1;
@@ -97,6 +102,18 @@ z3::expr Register::read(const ArchState& arch) const {
         case X86_REG_XMM5: return arch.xmm5;
         case X86_REG_XMM6: return arch.xmm6;
         case X86_REG_XMM7: return arch.xmm7;
+            
+        case X86_REG_ST0:
+        case X86_REG_ST1:
+        case X86_REG_ST2:
+        case X86_REG_ST3:
+        case X86_REG_ST4:
+        case X86_REG_ST5:
+        case X86_REG_ST6:
+        case X86_REG_ST7: {
+            const unsigned idx = reg - X86_REG_ST0;
+            return arch.fpu.get(idx);
+        }
             
         default:
             unimplemented("reg %s", cs_reg_name(g_handle, reg));
@@ -125,9 +142,29 @@ void Register::write(ArchState& arch, const z3::expr& e) const {
         case X86_REG_XMM6: arch.xmm6 = e; break;
         case X86_REG_XMM7: arch.xmm7 = e; break;
             
+            
         case X86_REG_AL: arch.eax = z3::bv_store(arch.eax, e, 0); break;
         case X86_REG_BL: arch.ebx = z3::bv_store(arch.ebx, e, 0); break;
         case X86_REG_CL: arch.ecx = z3::bv_store(arch.ecx, e, 0); break;
+        case X86_REG_DL: arch.edx = z3::bv_store(arch.edx, e, 0); break;
+            
+        case X86_REG_DH: arch.edx = z3::bv_store(arch.edx, e, 8); break;
+            
+        case X86_REG_DX: arch.edx = z3::bv_store(arch.edx, e, 0); break;
+            
+        case X86_REG_ST0:
+        case X86_REG_ST1:
+        case X86_REG_ST2:
+        case X86_REG_ST3:
+        case X86_REG_ST4:
+        case X86_REG_ST5:
+        case X86_REG_ST6:
+        case X86_REG_ST7: {
+            const unsigned idx = reg - X86_REG_ST0;
+            const z3::expr fp = arch.fpu.to_fp(e);
+            arch.fpu.set(idx, fp);
+            break;
+        }
             
         default:
             unimplemented("reg %s", cs_reg_name(g_handle, reg));

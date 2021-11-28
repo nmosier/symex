@@ -78,7 +78,7 @@ private:
     void transfer_cmovcc(ArchState& arch, z3::context& ctx, ReadOut read_out, WriteOut write_out) const;
     void transfer_string(ArchState& arch, z3::context& ctx, ReadOut read_out, WriteOut write_out) const;
     void transfer_string_rep(ArchState& arch, z3::context& ctx, ReadOut read_out, WriteOut write_out) const;
-    void transfer_shift(ArchState& arch, z3::context& ctx, ReadOut read_out, WriteOut write_out) const;
+    void transfer_shift(unsigned id, ArchState& arch, z3::context& ctx, ReadOut read_out, WriteOut write_out) const;
     void transfer_imul(ArchState& arch, z3::context& ctx, ReadOut read_out, WriteOut write_out) const;
 };
 
@@ -100,6 +100,7 @@ struct Condition {
         LE, // ZF == 1 || SF != OF
         L,
         AE, // CF == 0
+        BE, // CF == 1 || ZF == 1
     } kind;
     
     Condition(Kind kind): kind(kind) {}

@@ -349,4 +349,12 @@ std::ostream& operator<<(std::ostream& os, const std::vector<T>& a) {
     return os;
 }
 
+
+template <class Container, class OutputIt>
+OutputIt copy(const Container& container, OutputIt out) {
+    for (const auto& x : container) {
+        *out++ = x;
+    }
+}
+
 }

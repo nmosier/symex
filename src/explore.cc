@@ -65,7 +65,16 @@ void Context::explore_paths_rec(Program& program, const ArchState& in_arch, z3::
     ArchState arch = in_arch;
     ReadVec reads;
     WriteVec writes;
-    inst.transfer(arch, std::back_inserter(reads), std::back_inserter(writes));
+    
+    const auto transfer_it = transfers.find(addr);
+    if (transfer_it == transfers.end()) {
+        inst.transfer(arch, std::back_inserter(reads), std::back_inserter(writes));
+    } else {
+        transfer_it->second(arch, solver, std::back_inserter(reads), std::back_inserter(writes), write_mask, core);
+    }
+    
+    
+    
     ArchState out_arch = arch;
     // out_arch.create(next_id++, solver);
     
@@ -74,7 +83,7 @@ void Context::explore_paths_rec(Program& program, const ArchState& in_arch, z3::
     }
     
 
-    std::cerr << "inst @ " << syms.desc(addr) << " : "  << inst.I->mnemonic << " " << inst.I->op_str << "\n";
+    std::cerr << "inst @ " << std::hex << addr << " " << syms.desc(addr) << " : "  << inst.I->mnemonic << " " << inst.I->op_str << "\n";
     
     I = inst.I;
     
@@ -132,6 +141,10 @@ void Context::explore_paths() {
         v.push_back(e != 0x42424242);
         assert(solver.check(v) == z3::unsat);
     }
+    
+    if (conf::entrypoint) {
+        in_arch.eip = ctx.bv_val(*conf::entrypoint, 32);
+    }
  
 #if 0
     explore_paths_loop(in_arch, solver, write_mask);
@@ -147,7 +160,15 @@ void Context::explore_paths() {
 
 void Context::explore_paths_rec_dst(Program& program, const ArchState& in_arch, const ArchState& out_arch, z3::solver& solver, const ByteMap& write_mask) {
         
-    if (out_arch.eip.simplify().is_numeral()) {
+    if (out_arch.eip.is_numeral()) {
+        
+#if 0
+        {
+            solver.check();
+            const auto model = solver.get_model();
+            std::cerr << std::hex << "edi=" << model.eval(out_arch.edi, true) << " esi=" << model.eval(out_arch.esi, true) << "\n";
+        }
+#endif
         
         explore_paths_rec(program, out_arch, solver, out_arch.eip.simplify().get_numeral_uint64(), write_mask);
         
@@ -172,7 +193,7 @@ void Context::explore_paths_rec_dst(Program& program, const ArchState& in_arch, 
             const z3::model model = solver.get_model();
             const z3::expr eip = model.eval(out_arch.eip, true);
             // std::cerr << "dst " << eip << "\n";
-            
+
             solver.push();
             {
                 solver.add(eip == out_arch.eip);
