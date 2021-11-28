@@ -25,11 +25,11 @@ struct MemoryOperand {
     
     MemoryOperand(const x86_op_mem& mem): mem(mem) {}
     
-    z3::expr read(const ArchState& arch, unsigned size, ReadOut read_out) const;
+    z3::expr read(ArchState& arch, unsigned size, z3::solver& solver) const;
     
-    void write(ArchState& arch, const z3::expr& e, WriteOut write_out) const;
+    void write(ArchState& arch, const z3::expr& e, z3::solver& solver) const;
     
-    z3::expr addr(const ArchState& arch) const;
+    z3::expr addr(ArchState& arch) const;
 };
 
 struct Operand {
@@ -37,9 +37,9 @@ struct Operand {
     
     Operand(const cs_x86_op& op): op(op) {}
     
-    z3::expr read(const ArchState& arch, ReadOut read_out) const;
+    z3::expr read(ArchState& arch, z3::solver& solver) const;
     
-    void write(ArchState& arch, const z3::expr& e, WriteOut write_out) const;
+    void write(ArchState& arch, const z3::expr& e, z3::solver& solver) const;
     
     unsigned size() const { return op.size; }
     unsigned bits() const { return size() * 8; }

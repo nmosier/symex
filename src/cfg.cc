@@ -76,6 +76,7 @@ void CFG::add(addr_t addr) {
     }
 }
 
+#if 0
 /* MARK: iter.arch should contain initial state (size=1) */
 void CFG::Loop::transfer_iteration(Iteration& iter, bool reset_mem) const {
     for (const Inst& I : body) {
@@ -830,6 +831,7 @@ std::optional<ArchState> CFG::Loop::Analysis::analyze() {
     }
 }
 
+#endif
 
 
 }

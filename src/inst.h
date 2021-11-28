@@ -14,7 +14,7 @@ struct Inst {
     using ReadOut = std::back_insert_iterator<std::vector<MemState::Read>>;
     using WriteOut = std::back_insert_iterator<std::vector<MemState::Write>>;
     
-    void transfer(ArchState& arch, ReadOut read_out, WriteOut write_out) const;
+    void transfer(ArchState& arch, z3::solver& solver) const;
     
     bool operator<(const Inst& other) const {
         return I < other.I;
@@ -69,17 +69,17 @@ private:
         return bv.extract(i, i) == ctx.bv_val(1, 1);
     }
     
-    void transfer_acc_src(ArchState& arch, ReadOut read_out, WriteOut write_out) const;
+    void transfer_acc_src(ArchState& arch, z3::solver& solver) const;
     z3::expr transfer_acc_src_arith(unsigned id, ArchState& arch, z3::context& ctx, const z3::expr& acc,
                                 const z3::expr& src, unsigned bits) const;
     z3::expr transfer_acc_src_logic(unsigned id, ArchState& arch, z3::context& ctx, const z3::expr& acc,
                                 const z3::expr& src, unsigned bits) const;
-    void transfer_jcc(ArchState& arch, z3::context& ctx, ReadOut read_out, WriteOut write_out) const;
-    void transfer_cmovcc(ArchState& arch, z3::context& ctx, ReadOut read_out, WriteOut write_out) const;
-    void transfer_string(ArchState& arch, z3::context& ctx, ReadOut read_out, WriteOut write_out) const;
-    void transfer_string_rep(ArchState& arch, z3::context& ctx, ReadOut read_out, WriteOut write_out) const;
-    void transfer_shift(unsigned id, ArchState& arch, z3::context& ctx, ReadOut read_out, WriteOut write_out) const;
-    void transfer_imul(ArchState& arch, z3::context& ctx, ReadOut read_out, WriteOut write_out) const;
+    void transfer_jcc(ArchState& arch, z3::context& ctx, z3::solver& solver) const;
+    void transfer_cmovcc(ArchState& arch, z3::context& ctx, z3::solver& solver) const;
+    void transfer_string(ArchState& arch, z3::context& ctx, z3::solver& solver) const;
+    void transfer_string_rep(ArchState& arch, z3::context& ctx, z3::solver& solver) const;
+    void transfer_shift(unsigned id, ArchState& arch, z3::context& ctx, z3::solver& solver) const;
+    void transfer_imul(ArchState& arch, z3::context& ctx, z3::solver& solver) const;
 };
 
 inline std::ostream& operator<<(std::ostream& os, const Inst& x) {

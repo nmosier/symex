@@ -25,6 +25,7 @@ struct Peephole {
  * This avoids a read from memory.
  */
 
+#if 0
 struct ReadEIP: Peephole {
     virtual bool operator()(addr_t eip0, CoreProgram& program, ArchState& arch, ReadOut read_out, WriteOut write_out) const override {
         z3::context& ctx = arch.ctx();
@@ -52,5 +53,6 @@ struct ReadEIP: Peephole {
         return true;
     }
 };
+#endif
 
 }

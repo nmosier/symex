@@ -12,8 +12,8 @@ std::ostream& operator<<(std::ostream& os, const ArchState& arch) {
 
 #define ENT_(name, ...) name(ctx)
 #define ENT(name, ...) ENT_(name),
-ArchState::ArchState(z3::context& ctx):
-X_x86_ALL(ENT, ENT_), mem(ctx), fpu(ctx) {
+ArchState::ArchState(z3::context& ctx, cores::Core& core):
+X_x86_ALL(ENT, ENT_), mem(ctx, core), fpu(ctx) {
     zero(); // TODO: disable this
 }
 #undef ENT_
@@ -58,11 +58,12 @@ void ArchState::transform_expr(std::function<z3::expr (const z3::expr&)> f) {
     mem.mem = f(mem.mem);
 }
 
-
+#if 0
 void ArchState::stackdump(unsigned words, const z3::eval& eval) const {
     for (int i = 0; i < words; ++i) {
         std::cerr << eval(mem.read(esp + i * 4, 4, util::null_output_iterator())) << "\n";
     }
 }
+#endif
 
 }

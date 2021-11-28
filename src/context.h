@@ -91,7 +91,9 @@ struct Context {
     
     Context(const std::string& core_path): ctx(), core(core_path.c_str()), program(core), cfg(program), zero(ctx.int_val(0)) {
         core.parse();
+#if 0
         peepholes.push_back(std::make_unique<ReadEIP>());
+#endif
         bind_abstract_transfers();
         if (core_fopen(core_path.c_str(), &core2) < 0) {
             core_perror("core_fopen");
@@ -137,7 +139,7 @@ struct Context {
     void find_assignments(const z3::expr& value, const ArchState& arch, z3::solver& solver, const ReadVec& reads, ByteMap& initialized_mem, OutputIt out);
 
     void check_accesses(const ReadVec& reads, const WriteVec& writes, z3::solver& solver);
-    void check_operands(const Inst& I, const ArchState& arch, z3::solver& solver);
+    void check_operands(const Inst& I, ArchState& arch, z3::solver& solver);
     void check_regs(const ArchState& arch);
     
     unsigned trace_counter = 0;
@@ -155,12 +157,12 @@ struct Context {
 #if 0
         transfers.emplace(0xa7c5c279, transfer::sym_strncat);
         transfers.emplace(0xa7de7e09, transfer::sym_strnlen);
-        //transfers.emplace(0x)
-#endif
         transfers.emplace(0xa7ca0a18, transfer::sym_strncasecmp);
+#endif
     }
 };
 
+#if 0
 template <typename OutputIt>
 OutputIt Context::cover_execution(z3::solver& solver, const ReadVec& reads, OutputIt read_set_out) const {
     z3::context& ctx = solver.ctx();
@@ -207,5 +209,6 @@ void Context::apply_read_set(z3::solver& solver, InputIt begin, InputIt end) con
         solver.add(mem[addr] == core.read<uint8_t>(*it));
     }
 }
+#endif
 
 }

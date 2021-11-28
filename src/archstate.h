@@ -49,7 +49,7 @@ struct ArchState {
     MemState mem;
     FPUState fpu;
     
-    ArchState(z3::context& ctx);
+    ArchState(z3::context& ctx, cores::Core& core);
     
     void create(unsigned id, z3::solver& solver);
     

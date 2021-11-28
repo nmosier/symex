@@ -28,7 +28,7 @@ void Context::check_accesses(const ReadVec& reads, const WriteVec& writes, z3::s
     }
 }
 
-void Context::check_operands(const Inst& I, const ArchState& arch, z3::solver& solver) {
+void Context::check_operands(const Inst& I, ArchState& arch, z3::solver& solver) {
     for (unsigned i = 0; i < I.x86->op_count; ++i) {
         const auto& operand = I.x86->operands[i];
         if (operand.type == X86_OP_MEM) {

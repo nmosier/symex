@@ -68,7 +68,7 @@ void Context::explore_paths_rec(Program& program, const ArchState& in_arch, z3::
     
     const auto transfer_it = transfers.find(addr);
     if (transfer_it == transfers.end()) {
-        inst.transfer(arch, std::back_inserter(reads), std::back_inserter(writes));
+        inst.transfer(arch, solver);
     } else {
         transfer_it->second(arch, solver, std::back_inserter(reads), std::back_inserter(writes), write_mask, core);
     }
@@ -77,11 +77,6 @@ void Context::explore_paths_rec(Program& program, const ArchState& in_arch, z3::
     
     ArchState out_arch = arch;
     // out_arch.create(next_id++, solver);
-    
-    if (writes.size() == 0) {
-        assert(z3::eq(out_arch.mem.mem, in_arch.mem.mem));
-    }
-    
 
     std::cerr << "inst @ " << std::hex << addr << " " << syms.desc(addr) << " : "  << inst.I->mnemonic << " " << inst.I->op_str << "\n";
     
@@ -94,7 +89,7 @@ void Context::explore_paths_rec(Program& program, const ArchState& in_arch, z3::
 
 void Context::explore_paths() {
     z3::solver solver {ctx};
-    ArchState in_arch {ctx};
+    ArchState in_arch {ctx, core};
     
     // DEBUG: profiler
     ProfilerStart("a.prof");
@@ -124,18 +119,14 @@ void Context::explore_paths() {
     ByteMap write_mask;
     for (const auto& range : symbolic_ranges) {
         for (uint64_t addr = range.base; addr < range.base + range.len; ++addr) {
-            write_mask.insert(addr);
+            in_arch.mem.init.insert(addr);
         }
     }
     
-    
     // set return address
-    in_arch.mem.write(in_arch.esp, ctx.bv_val(0x42424242, 32), util::null_output_iterator());
-    for (uint64_t i = 0; i < 4; ++i) {
-        write_mask.insert(in_arch.esp.get_numeral_uint64() + i);
-    }
+    in_arch.mem.write(in_arch.esp, ctx.bv_val(0x42424242, 32), solver);
     
-    auto e = in_arch.mem.read(in_arch.esp, 4, util::null_output_iterator());
+    auto e = in_arch.mem.read(in_arch.esp, 4, solver);
     {
         z3::expr_vector v {ctx};
         v.push_back(e != 0x42424242);

@@ -6,7 +6,7 @@
 
 namespace x86 {
 
-z3::expr MemoryOperand::addr(const ArchState& arch) const {
+z3::expr MemoryOperand::addr(ArchState& arch) const {
     z3::context& ctx = arch.ctx();
     z3::expr base =
     mem.base == X86_REG_INVALID ? ctx.bv_val(0, 32) : Register(mem.base).read(arch);
@@ -18,22 +18,22 @@ z3::expr MemoryOperand::addr(const ArchState& arch) const {
     return addr;
 }
 
-z3::expr MemoryOperand::read(const ArchState& arch, unsigned size, ReadOut read_out) const {
+z3::expr MemoryOperand::read(ArchState& arch, unsigned size, z3::solver& solver) const {
     if (mem.segment != X86_REG_INVALID) {
         std::cerr << "warning: segment address; returning 0\n";
         return arch.ctx().bv_val(0, size * 8);
     }
     
     const z3::expr addr_ = addr(arch);
-    return arch.mem.read(addr_, size, read_out);
+    return arch.mem.read(addr_, size, solver);
 }
 
-void MemoryOperand::write(ArchState& arch, const z3::expr& e, WriteOut write_out) const {
+void MemoryOperand::write(ArchState& arch, const z3::expr& e, z3::solver& solver) const {
     const z3::expr addr_ = addr(arch);
-    arch.mem.write(addr_, e, write_out);
+    arch.mem.write(addr_, e, solver);
 }
 
-z3::expr Operand::read(const ArchState& arch, ReadOut read_out) const {
+z3::expr Operand::read(ArchState& arch, z3::solver& solver) const {
     z3::context& ctx = arch.ctx();
     const unsigned bits = op.size * 8;
     switch (op.type) {
@@ -44,7 +44,7 @@ z3::expr Operand::read(const ArchState& arch, ReadOut read_out) const {
             return ctx.bv_val(op.imm, bits);
             
         case X86_OP_MEM: {
-            return MemoryOperand(op.mem).read(arch, op.size, read_out);
+            return MemoryOperand(op.mem).read(arch, op.size, solver);
         }
             
         default:
@@ -52,7 +52,7 @@ z3::expr Operand::read(const ArchState& arch, ReadOut read_out) const {
     }
 }
 
-void Operand::write(ArchState& arch, const z3::expr& e, WriteOut write_out) const {
+void Operand::write(ArchState& arch, const z3::expr& e, z3::solver& solver) const {
     switch (op.type) {
         case X86_OP_REG:
             Register(op.reg).write(arch, e);
@@ -62,7 +62,7 @@ void Operand::write(ArchState& arch, const z3::expr& e, WriteOut write_out) cons
             throw std::logic_error("assignment to immediate");
             
         case X86_OP_MEM:
-            MemoryOperand(op.mem).write(arch, e, write_out);
+            MemoryOperand(op.mem).write(arch, e, solver);
             break;
             
         default: std::abort();

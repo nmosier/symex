@@ -7,23 +7,31 @@ namespace {
 namespace detail {
 
 template <int I>
-void args_impl(const x86::ArchState& arch) {}
+void args_impl(x86::ArchState& arch, z3::solver& solver) {}
 
 template <int I, typename... Ts>
-void args_impl(const x86::ArchState& arch, z3::expr& arg, Ts&... ts) {
+void args_impl(x86::ArchState& arch, z3::solver& solver, z3::expr& arg, Ts&... ts) {
+#if 0
     arg = arch.mem.read(arch.esp + (I + 1) * 4, 4, util::null_output_iterator());
-    args_impl<I+1>(arch, ts...);
+#else
+    arg = arch.mem.read(arch.esp + (I + 1) * 4, 4, solver);
+#endif
+    args_impl<I+1>(arch, solver, ts...);
 }
 
 }
 
 template <typename... Ts>
-void args(const x86::ArchState& arch, Ts&... ts) {
-    detail::args_impl<0>(arch, ts...);
+void args(x86::ArchState& arch, z3::solver& solver, Ts&... ts) {
+    detail::args_impl<0>(arch, solver, ts...);
 }
 
-void ret(x86::ArchState& arch, const z3::expr& rv) {
+void ret(x86::ArchState& arch, const z3::expr& rv, z3::solver& solver) {
+#if 0
     arch.eip = arch.mem.read(arch.esp, 4, util::null_output_iterator());
+#else
+    arch.eip = arch.mem.read(arch.esp, 4, solver);
+#endif
     arch.esp = arch.esp + 4;
 }
 
@@ -90,63 +98,9 @@ z3::expr strncasecmp(const x86::ArchState& arch, const z3::expr& s1, const z3::e
     return acc;
 }
 
-
-
-namespace detail {
-
-/* Check if the next N characters are concerete */
-template <class OutputIt>
-bool check_string_concrete_n(const x86::ArchState& arch, const z3::expr& addr0, z3::solver& solver, const cores::Core& core, const ByteMap& write_mask, OutputIt out, unsigned n) {
-    z3::context& ctx = arch.ctx();
-
-    z3::expr_vector sym_chars {ctx};
-    for (unsigned i = 0; i < n; ++i) {
-        const z3::expr sym_i = ctx.bv_val(i, 32);
-        const z3::expr addr = addr0 + sym_i;
-        const Read read {addr, arch.mem.mem[addr]};
-        z3::expr symc = read(core, write_mask);
-        sym_chars.push_back(symc);
-    }
-    
-    z3::expr_vector con_chars {ctx};
-    if (z3::unique_assignment(solver, ctx.bool_val(true), sym_chars, con_chars)) {
-        util::copy(con_chars, out);
-        return true;
-    } else {
-        return false;
-    }
 }
 
-}
-
-
-/* Check if string is concrete. If so, return string. */
-template <class OutputIt>
-bool check_string_concrete(const x86::ArchState& arch, const z3::expr& addr, z3::solver& solver, const cores::Core& core, const ByteMap& write_mask, OutputIt out) {
-    z3::context& ctx = arch.ctx();
-    while (true) {
-        const Read read {addr, arch.mem.mem[addr]};
-        z3::expr sym_c = read(core, write_mask);
-        /* try simplifying */
-        if (!sym_c.is_numeral()) {
-            sym_c = sym_c.simplify();
-        }
-        /* check uniqueness */
-        z3::expr con_c {ctx};
-        if (sym_c.is_numeral()) {
-            con_c = sym_c;
-        } else {
-            if (!z3::unique_assignment(solver, ctx.bool_val(true), sym_c, con_c)) {
-                return false;
-            }
-        }
-        
-        *out++ = con_c.get_numeral_uint64();
-    }
-}
-
-
-}
+#if 0
 
 void sym_strncasecmp(x86::ArchState& arch, z3::solver& solver, ReadOut read_out, WriteOut write_out, ByteMap& write_mask, const cores::Core& core) {
     
@@ -157,7 +111,7 @@ void sym_strncasecmp(x86::ArchState& arch, z3::solver& solver, ReadOut read_out,
     z3::expr s1 {ctx};
     z3::expr s2 {ctx};
     z3::expr n {ctx};
-    args(arch, s1, s2, n);
+    args(arch, solver, s1, s2, n);
     
     z3::expr_vector variables {ctx};
     variables.push_back(n);
@@ -207,11 +161,12 @@ void sym_strncasecmp(x86::ArchState& arch, z3::solver& solver, ReadOut read_out,
         acc = z3::ite(diff[i] == 0, acc, diff[i]);
     }
     
-    ret(arch, z3::sext(acc, 32 - 8));
+    ret(arch, z3::sext(acc, 32 - 8), solver);
 }
+#endif
 
 void sym_nop(x86::ArchState& arch, z3::solver& solver) {
-    ret(arch, arch.ctx().bv_val(0, 32));
+    ret(arch, arch.ctx().bv_val(0, 32), solver);
 }
 
 void sym_memcpy(x86::ArchState& arch, z3::solver& solver) {
@@ -220,12 +175,12 @@ void sym_memcpy(x86::ArchState& arch, z3::solver& solver) {
     z3::expr dst {ctx};
     z3::expr src {ctx};
     z3::expr len {ctx};
-    args(arch, dst, src, len);
+    args(arch, solver, dst, src, len);
     
     arch.mem.mem = memcpy(arch, dst, src, len);
     
     /* return address */
-    ret(arch, dst);
+    ret(arch, dst, solver);
 }
 
 
@@ -234,7 +189,7 @@ void sym_strncat(x86::ArchState& arch, z3::solver& solver) {
     z3::expr mem = arch.mem.mem;
     
     z3::expr dst {ctx}, src {ctx}, len {ctx};
-    args(arch, dst, src, len);
+    args(arch, solver, dst, src, len);
     
     /* get length of dst string */
     const z3::expr dst_len = strlen(arch, dst, solver);
@@ -243,7 +198,7 @@ void sym_strncat(x86::ArchState& arch, z3::solver& solver) {
     mem = memcpy(arch, dst + dst_len, src, len);
     mem = z3::store(mem, dst + dst_len + len, ctx.bv_val(0, 8));
     
-    ret(arch, dst);
+    ret(arch, dst, solver);
 }
 
 void sym_strnlen(x86::ArchState& arch, z3::solver& solver) {
@@ -252,11 +207,12 @@ void sym_strnlen(x86::ArchState& arch, z3::solver& solver) {
     
     z3::expr src {ctx};
     z3::expr maxlen {ctx};
-    args(arch, src, maxlen);
+    args(arch, solver, src, maxlen);
     
     z3::expr res = strnlen(arch, src, maxlen, solver);
     
-    ret(arch, res);
+    ret(arch, res, solver);
 }
 
 }
+

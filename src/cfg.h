@@ -122,7 +122,7 @@ struct CFG::Loop::Iteration {
     Iteration(const ArchState& in) { archs.push_back(in); }
 };
 
-
+#if 0
 struct CFG::Loop::Analysis {
     /* inputs */
     const Loop& loop;
@@ -326,5 +326,6 @@ void CFG::get_loops_rec(addr_t addr, Loop& loop, AddrSet& seen, OutputIt& out) c
     loop.body.pop_back();
     seen.erase(addr);
 }
+#endif
 
 }
