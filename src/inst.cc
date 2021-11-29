@@ -108,9 +108,12 @@ void Inst::transfer(ArchState& arch, z3::solver& solver) const {
         case X86_INS_SAR:
         case X86_INS_FLDZ:
         case X86_INS_FXCH:
+        case X86_INS_MOVDQA:
+        case X86_INS_SETE:
+        case X86_INS_SETG:
             break;
             
-        default: unimplemented("of %s", I->mnemonic);
+        default: unimplemented("of %s (%d)", I->mnemonic, I->id);
     }
     
     
@@ -153,7 +156,8 @@ void Inst::transfer(ArchState& arch, z3::solver& solver) const {
         case X86_INS_MOV:
         case X86_INS_MOVD:
         case X86_INS_MOVQ:
-        case X86_INS_MOVDQU: {
+        case X86_INS_MOVDQU:
+        case X86_INS_MOVDQA: {
             assert(x86->op_count == 2);
             const Operand dst {x86->operands[0]};
             const Operand src {x86->operands[1]};
@@ -294,11 +298,15 @@ void Inst::transfer(ArchState& arch, z3::solver& solver) const {
             eip = arch.eip;
             break;
             
-        case X86_INS_SETNE: {
+        case X86_INS_SETNE:
+        case X86_INS_SETE:
+        case X86_INS_SETG: {
             const Operand acc_op {x86->operands[0]};
             using K = Condition::Kind;
             static const std::unordered_map<unsigned, K> map = {
                 {X86_INS_SETNE, K::NE},
+                {X86_INS_SETE,  K::E},
+                {X86_INS_SETG,  K::G},
             };
             const Condition cond {map.at(I->id)};
             const z3::expr cc = cond(arch);

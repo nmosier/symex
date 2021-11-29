@@ -53,7 +53,7 @@ std::vector<z3::expr> MemState::initialize(const z3::expr& sym_addr, unsigned si
     for (const z3::expr& con_addr : con_addrs) {
         for (unsigned i = 0; i < size; ++i) {
             const uint64_t int_addr = con_addr.get_numeral_uint64() + i;
-            if (init.insert(int_addr)) {
+            if (init.insert(int_addr).second) {
                 /* initialize address */
                 const uint8_t byte = core.read<uint8_t>(int_addr);
                 sym_mem = z3::store(sym_mem, ctx().bv_val(int_addr, 32), ctx().bv_val(byte, 8));
@@ -86,6 +86,7 @@ z3::expr MemState::read_byte(const z3::expr& sym_addr, const std::vector<z3::exp
         
         const z3::expr& con_addr = con_addrs.front();
         const uint64_t int_addr = con_addr.get_numeral_uint64();
+#if 1
         const auto con_mem_it = con_mem.find(int_addr);
         
         if (con_mem_it == con_mem.end()) {
@@ -99,8 +100,17 @@ z3::expr MemState::read_byte(const z3::expr& sym_addr, const std::vector<z3::exp
             return con_mem_it->second;
             
         }
+#else
+        if (const auto con_data = con_mem.find(int_addr)) {
+            return *con_data;
+        } else {
+            return ctx().bv_val(core.read<uint8_t>(int_addr), 8);
+        }
+#endif
         
     } else {
+        
+        std::cerr << "SYMBOLIC-READ\n";
         
         /* read is symbolic: can source many locations */
         return sym_mem[sym_addr];
@@ -127,6 +137,8 @@ void MemState::write_byte(const z3::expr& sym_addr, const std::vector<z3::expr>&
         sym_writes.erase(int_addr);
         
     } else {
+        
+        std::cerr << "SYMBOLIC-WRITE\n";
         
         /* update symbolic memory */
         sym_mem = z3::store(sym_mem, sym_addr, sym_data);

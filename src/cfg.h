@@ -39,7 +39,7 @@ private:
     }
     
     template <typename OutputIt>
-    void get_loops_rec(addr_t addr, Loop& loop, AddrSet& seen, OutputIt& out) const;
+    void get_loops_rec(addr_t addr, Loop& loop, AddrSet2& seen, OutputIt& out) const;
 };
 
 struct CFG::Loop {

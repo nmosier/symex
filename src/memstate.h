@@ -104,7 +104,7 @@ void MemState::write(const z3::expr& address, const z3::expr& value, OutputIt wr
 #endif
 
 
-struct Mask {
+struct AddrSet2 {
     static inline constexpr uint64_t pagesize = 4096;
     static inline constexpr uint64_t pagemask = pagesize - 1;
     
@@ -120,6 +120,22 @@ struct Mask {
         return res;
     }
     
+    bool contains(value_type x) const {
+        const auto it = map.find(key(x));
+        if (it == map.end()) {
+            return false;
+        } else {
+            return it->second[value(x)];
+        }
+    }
+    
+    void erase(value_type x) {
+        const auto it = map.find(key(x));
+        if (it != map.end()) {
+            it->second[value(x)] = false;
+        }
+    }
+    
 private:
     
     static value_type key(value_type x) {
@@ -131,17 +147,99 @@ private:
 };
 
 
+#if 0
+template <class T>
+struct AddrMap2 {
+    static inline constexpr uint64_t pagesize = 4096;
+    static inline constexpr uint64_t pagemask = pagesize - 1;
+    
+    using key_type = uint64_t;
+    using mapped_type = T;
+    
+    using Array = std::array<std::optional<z3::expr>, pagesize>;
+    using Map = std::unordered_map<key_type, Array>;
+    
+    Map map;
+    
+    std::optional<z3::expr> find(key_type x) const {
+        const auto it = map.find(key(x));
+        if (it == map.end()) {
+            return std::nullopt;
+        } else {
+            return it->second[value(x)];
+        }
+    }
+    
+    void insert_or_assign(key_type key, const mapped_type& value) {
+        map[this->key(key)][this->value(key)] = value;
+    }
+    
+private:
+    
+    static key_type key(key_type x) {
+        return x & ~pagemask;
+    }
+    static key_type value(key_type x) {
+        return x & pagemask;
+    }
+};
+#else
+template <class T>
+struct AddrMap2 {
+    static inline constexpr uint64_t pagesize = 4096;
+    static inline constexpr uint64_t pagemask = pagesize - 1;
+    
+    using key_type = uint64_t;
+    using mapped_type = T;
+    
+    using Submap = std::unordered_map<key_type, mapped_type>;
+    using Map = std::unordered_map<key_type, Submap>;
+    Map map;
+    
+    std::optional<z3::expr> find(key_type x) const {
+        const auto it = map.find(key(x));
+        if (it == map.end()) {
+            return std::nullopt;
+        } else {
+            const auto it2 = it->second.find(value(x));
+            if (it2 == it->second.end()) {
+                return std::nullopt;
+            } else {
+                return it2->second;
+            }
+        }
+    }
+    
+    void insert_or_assign(key_type key, const mapped_type& value) {
+        const auto res = map.emplace(this->key(key), Submap());
+        if (res.second) {
+            res.first->second.reserve(pagesize);
+        }
+        res.first->second.insert_or_assign(this->value(key), value);
+    }
+    
+private:
+    
+    static key_type key(key_type x) {
+        return x & ~pagemask;
+    }
+    static key_type value(key_type x) {
+        return x & pagemask;
+    }
+};
+#endif
+
 
 struct MemState {
     cores::Core& core;
     using Map = std::unordered_map<uint64_t, z3::expr>;
     Map con_mem;
     z3::expr sym_mem;
-#if 0
-    using Mask = std::unordered_set<uint64_t>;
+#if 1
+    using AddrSet2 = std::unordered_set<uint64_t>;
 #endif
-    Mask init;
-    Mask sym_writes;
+    AddrSet2 init;
+    AddrSet2 sym_writes;
     
     struct Access {
         z3::expr addr;
