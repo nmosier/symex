@@ -240,6 +240,7 @@ struct MemState {
 #endif
     AddrSet2 init;
     AddrSet2 sym_writes;
+    AddrSet2 uncommitted_writes;
     
     struct Access {
         z3::expr addr;
@@ -295,10 +296,9 @@ struct MemState {
     static z3::expr get_init_mem(z3::context& ctx);
     
 private:
-    std::vector<z3::expr> initialize(const z3::expr& sym_addr, unsigned size, z3::solver& solver);
-    
     z3::expr read_byte(const z3::expr& sym_addr, const std::vector<z3::expr>& con_addrs);
     void write_byte(const z3::expr& sym_addr, const std::vector<z3::expr>& con_addrs, const z3::expr& sym_data);
+    void check() const;
 };
 
 

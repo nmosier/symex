@@ -10,14 +10,16 @@ namespace x86 {
 struct FPUState {
     z3::expr stack;
     z3::expr size;
+    z3::expr control; // 16 bits
     
     static inline constexpr unsigned SINGLE_PREC_WIDTH = 32;
     static inline constexpr unsigned DOUBLE_PREC_WIDTH = 64;
     static inline constexpr unsigned EXTENDED_PREC_WIDTH = 80;
     
-    FPUState(z3::context& ctx): stack(ctx), size(ctx) {
+    FPUState(z3::context& ctx): stack(ctx), size(ctx), control(ctx) {
         stack = z3::const_array(ctx.int_sort(), ctx.fpa_nan(fp_sort()));
         size = ctx.int_val(0);
+        control = ctx.bv_val(0x037F, 16);
     }
     
     static const std::unordered_map<unsigned, std::pair<unsigned, unsigned>> fp_ieee_bits;

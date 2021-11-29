@@ -111,6 +111,19 @@ void Inst::transfer(ArchState& arch, z3::solver& solver) const {
         case X86_INS_MOVDQA:
         case X86_INS_SETE:
         case X86_INS_SETG:
+        case X86_INS_SETB:
+        case X86_INS_XORPS:
+        case X86_INS_MOVAPS:
+        case X86_INS_FNSTCW:
+        case X86_INS_FLDCW:
+        case X86_INS_FIST:
+        case X86_INS_FISTP:
+        case X86_INS_FADD:
+        case X86_INS_CWD:
+        case X86_INS_CDQ:
+        case X86_INS_SIDT:
+        case X86_INS_IDIV:
+        case X86_INS_SHLD:
             break;
             
         default: unimplemented("of %s (%d)", I->mnemonic, I->id);
@@ -157,7 +170,8 @@ void Inst::transfer(ArchState& arch, z3::solver& solver) const {
         case X86_INS_MOVD:
         case X86_INS_MOVQ:
         case X86_INS_MOVDQU:
-        case X86_INS_MOVDQA: {
+        case X86_INS_MOVDQA:
+        case X86_INS_MOVAPS: {
             assert(x86->op_count == 2);
             const Operand dst {x86->operands[0]};
             const Operand src {x86->operands[1]};
@@ -300,13 +314,15 @@ void Inst::transfer(ArchState& arch, z3::solver& solver) const {
             
         case X86_INS_SETNE:
         case X86_INS_SETE:
-        case X86_INS_SETG: {
+        case X86_INS_SETG:
+        case X86_INS_SETB: {
             const Operand acc_op {x86->operands[0]};
             using K = Condition::Kind;
             static const std::unordered_map<unsigned, K> map = {
                 {X86_INS_SETNE, K::NE},
                 {X86_INS_SETE,  K::E},
                 {X86_INS_SETG,  K::G},
+                {X86_INS_SETB,  K::B},
             };
             const Condition cond {map.at(I->id)};
             const z3::expr cc = cond(arch);
@@ -505,6 +521,128 @@ void Inst::transfer(ArchState& arch, z3::solver& solver) const {
             break;
         }
             
+        case X86_INS_XORPS: {
+            assert(x86->op_count == 2);
+            const Operand dst {x86->operands[0]};
+            const Operand src {x86->operands[1]};
+            const z3::expr val = src.read(arch, solver) ^ dst.read(arch, solver);
+            dst.write(arch, val, solver);
+            break;
+        }
+            
+        case X86_INS_FNSTCW: {
+            assert(x86->op_count == 1);
+            const Operand dst {x86->operands[0]};
+            const z3::expr src = arch.fpu.control;
+            dst.write(arch, src, solver);
+            break;
+        }
+            
+        case X86_INS_FLDCW: {
+            assert(x86->op_count == 1);
+            const Operand src {x86->operands[0]};
+            arch.fpu.control = src.read(arch, solver);
+            break;
+        }
+          
+        case X86_INS_FIST:
+        case X86_INS_FISTP: {
+            assert(x86->op_count == 1);
+            static const std::unordered_map<int, bool> pop_map = {
+                {X86_INS_FIST, false},
+                {X86_INS_FISTP, true},
+            };
+            const bool pop = pop_map.at(I->id);
+            const Operand dst {x86->operands[0]};
+            const Register src {X86_REG_ST0};
+            const z3::expr fp_val = src.read(arch);
+            const z3::expr int_val = z3::fpa_to_sbv(fp_val, dst.bits());
+            dst.write(arch, int_val, solver);
+            if (pop) {
+                arch.fpu.pop();
+            }
+            break;
+        }
+            
+        case X86_INS_FADD: {
+            assert(x86->op_count == 1);
+            const Operand src {x86->operands[0]};
+            const z3::expr src_bv_val = src.read(arch, solver);
+            const z3::expr src_fp_val = arch.fpu.to_fp(src_bv_val);
+            const Register acc {X86_REG_ST0};
+            const z3::expr fp_res = acc.read(arch) + src_fp_val;
+            acc.write(arch, fp_res);
+            break;
+        }
+            
+        case X86_INS_SIDT: {
+            const Operand dst {x86->operands[0]};
+            dst.write(arch, ctx.bv_val(0, 8 * 6), solver);
+            break;
+        }
+            
+        case X86_INS_CWD:
+        case X86_INS_CDQ: {
+            x86_reg src_reg, dst_reg;
+            switch (I->id) {
+                case X86_INS_CWD:
+                    src_reg = X86_REG_AX;
+                    dst_reg = X86_REG_DX;
+                    break;
+                case X86_INS_CDQ:
+                    src_reg = X86_REG_EAX;
+                    dst_reg = X86_REG_EDX;
+                    break;
+                default: std::abort();
+            }
+            const Register src {src_reg};
+            const Register dst {dst_reg};
+            const z3::expr src_val = src.read(arch);
+            const unsigned bits = src_val.get_sort().bv_size();
+            dst.write(arch, z3::sext(src_val.extract(bits - 1, bits - 1), bits - 1));
+            break;
+        }
+            
+        case X86_INS_IDIV: {
+            const Operand src {x86->operands[0]};
+            z3::expr src_val = src.read(arch, solver);
+            const unsigned bits = src.bits();
+            src_val = z3::sext(src_val, bits);
+            static const std::unordered_map<unsigned, std::pair<x86_reg, x86_reg>> map = {
+                {8, {X86_REG_AH, X86_REG_AL}},
+                {16, {X86_REG_AX, X86_REG_DX}},
+                {32, {X86_REG_EAX, X86_REG_EDX}},
+            };
+            const auto [r_hi, r_lo] = map.at(bits);
+            const Register acc_hi {r_hi};
+            const Register acc_lo {r_lo};
+            const z3::expr acc_val = z3::concat(acc_hi.read(arch), acc_lo.read(arch));
+            const z3::expr res = acc_val / src_val;
+            acc_hi.write(arch, res.extract(bits * 2 - 1, bits));
+            acc_lo.write(arch, res.extract(bits - 1, 0));
+            break;
+        }
+            
+        case X86_INS_SHLD: {
+            const Operand dst {x86->operands[0]};
+            const Operand src {x86->operands[1]};
+            const Operand cnt {x86->operands[2]};
+            assert(cnt.op.type != X86_OP_IMM);
+            const z3::expr dst_val = dst.read(arch, solver);
+            const z3::expr src_val = src.read(arch, solver);
+            z3::expr cnt_val = cnt.read(arch, solver);
+            cnt_val = cnt_val & ctx.bv_val(0b11111, cnt.bits());
+            const z3::expr cnt_val_z = z3::zext(cnt_val, dst.bits() - cnt.bits());
+            const z3::expr res = z3::concat(dst_val, src_val).extract(dst.bits() - 1, 0);
+            dst.write(arch, res, solver);
+            arch.cf = z3::ite(cnt_val == 0, arch.cf, z3::bvsign(z3::shl(dst_val, cnt_val_z - 1)));
+            arch.of = z3::ite(cnt_val == 1,
+                              dst_val.extract(dst.bits() - 1, dst.bits() - 1) ^
+                              dst_val.extract(dst.bits() - 2, dst.bits() - 2),
+                              z3::ite(cnt_val > 1, ctx.bv_val(0, 1), arch.of));
+            break;
+        }
+
         default: unimplemented("%s", I->mnemonic);
     }
     

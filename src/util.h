@@ -362,4 +362,32 @@ template<class... Ts> struct overloaded : Ts... { using Ts::operator()...; };
 // explicit deduction guide (not needed as of C++20)
 template<class... Ts> overloaded(Ts...) -> overloaded<Ts...>;
 
+
+
+namespace detail {
+struct defer_impl {
+    using F = std::function<void ()>;
+    F f;
+    defer_impl(F f): f(f) {}
+    ~defer_impl() { f(); }
+};
+}
+
+inline auto defer(detail::defer_impl::F f) {
+    return detail::defer_impl(f);
+}
+
+template <class Container>
+std::ostream& print(std::ostream& os, const Container& container) {
+    os << "{";
+    for (auto it = container.begin(); it != container.end(); ++it) {
+        if (it != container.begin()) {
+            os << " ";
+        }
+        os << *it;
+    }
+    os << "}";
+    return os;
+}
+
 }

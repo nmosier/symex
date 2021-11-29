@@ -44,34 +44,44 @@ MemState::MemState(z3::context& ctx, cores::Core& core): core(core), sym_mem(ctx
     sym_mem = get_init_mem(ctx);
 }
 
-std::vector<z3::expr> MemState::initialize(const z3::expr& sym_addr, unsigned size, z3::solver& solver) {
-    /* enumerate possibilities */
-    std::vector<z3::expr> con_addrs;
-    z3::enumerate(solver, sym_addr, std::back_inserter(con_addrs));
+/* INVARIANTS:
+ * - sym_writes holds the set of addresses that may have been symbolically written to.
+ * - uncommitted_writes holds the set of addresses that have been concretely but not symbolically written to.
+ * sym_writes and uncommitted_writes must not intersect.
+ *
+ */
 
-    /* initialize all writes */
-    for (const z3::expr& con_addr : con_addrs) {
-        for (unsigned i = 0; i < size; ++i) {
-            const uint64_t int_addr = con_addr.get_numeral_uint64() + i;
-            if (init.insert(int_addr).second) {
-                /* initialize address */
-                const uint8_t byte = core.read<uint8_t>(int_addr);
-                sym_mem = z3::store(sym_mem, ctx().bv_val(int_addr, 32), ctx().bv_val(byte, 8));
-            }
-        }
+void MemState::check() const {
+    /* check that uncommitted writes == keys in con_mem */
+#if 0
+    AddrSet2 keys;
+    std::transform(con_mem.begin(), con_mem.end(), std::inserter(keys, keys.end()), [] (const auto& p) { return p.first; });
+    if (keys != uncommitted_writes) {
+        std::cerr << "keys: "; util::print(std::cerr, keys) << "\n";
+        std::cerr << "uncommitted_writes: "; util::print(std::cerr, uncommitted_writes) << "\n";
     }
+    assert(keys == uncommitted_writes);
+#endif
     
-    return con_addrs;
+    /* check that uncommitted writes subset of keys in con_mem */
+    for (const auto key : uncommitted_writes) {
+        assert(con_mem.contains(key));
+    }
+
 }
 
 z3::expr MemState::read_byte(const z3::expr& sym_addr, const std::vector<z3::expr>& con_addrs) {
+    check();
+    const auto chk = util::defer([&] () { check(); });
     assert(!con_addrs.empty());
     
+#if 0
     /* DEBUG */
     for (const z3::expr& con_addr : con_addrs) {
         const uint64_t int_addr = con_addr.get_numeral_uint64();
         assert(init.contains(int_addr));
     }
+#endif
     
     /* check if any access in symbolic ranges. If so, use sym_mem */
     for (const z3::expr& con_addr : con_addrs) {
@@ -86,7 +96,6 @@ z3::expr MemState::read_byte(const z3::expr& sym_addr, const std::vector<z3::exp
         
         const z3::expr& con_addr = con_addrs.front();
         const uint64_t int_addr = con_addr.get_numeral_uint64();
-#if 1
         const auto con_mem_it = con_mem.find(int_addr);
         
         if (con_mem_it == con_mem.end()) {
@@ -100,17 +109,14 @@ z3::expr MemState::read_byte(const z3::expr& sym_addr, const std::vector<z3::exp
             return con_mem_it->second;
             
         }
-#else
-        if (const auto con_data = con_mem.find(int_addr)) {
-            return *con_data;
-        } else {
-            return ctx().bv_val(core.read<uint8_t>(int_addr), 8);
-        }
-#endif
         
     } else {
         
-        std::cerr << "SYMBOLIC-READ\n";
+        std::cerr << "SYMBOLIC-READ:";
+        for (const z3::expr& con_addr : con_addrs) {
+            std::cerr << " " << con_addr;
+        }
+        std::cerr << "\n";
         
         /* read is symbolic: can source many locations */
         return sym_mem[sym_addr];
@@ -119,6 +125,8 @@ z3::expr MemState::read_byte(const z3::expr& sym_addr, const std::vector<z3::exp
 }
 
 void MemState::write_byte(const z3::expr& sym_addr, const std::vector<z3::expr>& con_addrs, const z3::expr& sym_data) {
+    check();
+    const auto chk = util::defer([&] () { check(); });
     assert(!con_addrs.empty());
     
     /* check if write address can be concretized */
@@ -130,31 +138,48 @@ void MemState::write_byte(const z3::expr& sym_addr, const std::vector<z3::expr>&
         /* update concrete memory */
         con_mem.insert_or_assign(int_addr, sym_data);
         
-        /* update symbolic memory */
-        sym_mem = z3::store(sym_mem, con_addr, sym_data);
-        
         /* update symbolic write mask */
         sym_writes.erase(int_addr);
+        
+        /* update uncommitted write mask */
+        uncommitted_writes.insert(int_addr);
+        
+        /* update initialization mask */
+        init.insert(int_addr);
         
     } else {
         
         std::cerr << "SYMBOLIC-WRITE\n";
         
-        /* update symbolic memory */
-        sym_mem = z3::store(sym_mem, sym_addr, sym_data);
-        
-        /* update symbolic write mask */
+        /* commit write(s) if necessary and add to symbolic mask */
         for (const z3::expr& con_addr : con_addrs) {
             const uint64_t int_addr = con_addr.get_numeral_uint64();
+            if (uncommitted_writes.erase(int_addr)) {
+                /* commit write from con_mem to sym_mem */
+                const auto con_mem_it = con_mem.find(int_addr);
+                assert(con_mem_it != con_mem.end());
+                sym_mem = z3::store(sym_mem, con_addr, con_mem_it->second);
+                con_mem.erase(con_mem_it);
+            } else if (init.insert(int_addr).second) {
+                /* initialize write in sym_mem */
+                const uint8_t con_data = core.read<uint8_t>(int_addr);
+                const z3::expr sym_data = ctx().bv_val(con_data, 8);
+                sym_mem = z3::store(sym_mem, con_addr, sym_data);
+            }
             sym_writes.insert(int_addr);
         }
+        
+        /* update symbolic memory */
+        sym_mem = z3::store(sym_mem, sym_addr, sym_data);
         
     }
     
 }
 
 z3::expr MemState::read(const z3::expr &sym_addr, unsigned size, z3::solver& solver) {
-    const auto con_addrs = initialize(sym_addr, size, solver);
+    // const auto con_addrs = initialize(sym_addr, size, solver);
+    std::vector<z3::expr> con_addrs;
+    z3::enumerate(solver, sym_addr, std::back_inserter(con_addrs));
     
     /* perform read */
     std::vector<z3::expr> little;
@@ -177,7 +202,9 @@ void MemState::write(const z3::expr& sym_addr, const z3::expr& value, z3::solver
     const unsigned bits = value.get_sort().bv_size();
     const unsigned size = bits / 8;
     
-    const auto con_addrs = initialize(sym_addr, size, solver);
+    // const auto con_addrs = initialize(sym_addr, size, solver);
+    std::vector<z3::expr> con_addrs;
+    z3::enumerate(solver, sym_addr, std::back_inserter(con_addrs));
     
     /* perform write */
     for (unsigned i = 0; i < size; ++i) {
