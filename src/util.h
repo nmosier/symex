@@ -274,6 +274,15 @@ OutputIt enumerate(z3::solver& solver, const z3::expr& x, OutputIt out) {
     }
 }
 
+
+inline z3::expr truncate(const z3::expr& bv, unsigned bits) {
+    if (bv.get_sort().bv_size() == bits) {
+        return bv;
+    } else {
+        return bv.extract(bits - 1, 0);
+    }
+}
+
 }
 
 

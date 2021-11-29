@@ -45,88 +45,7 @@ z3::expr Condition::operator()(const ArchState& arch) const {
 
 void Inst::transfer(ArchState& arch, z3::solver& solver) const {
     switch (I->id) {
-        case X86_INS_PUSH:
-        case X86_INS_MOV:
-        case X86_INS_ADD:
-        case X86_INS_SUB:
-        case X86_INS_CALL:
-        case X86_INS_POP:
-        case X86_INS_TEST:
-        case X86_INS_AND:
-        case X86_INS_OR:
-        case X86_INS_XOR:
-        case X86_INS_PXOR:
-        case X86_INS_JE:
-        case X86_INS_CMP:
-        case X86_INS_LEA:
-        case X86_INS_RET:
-        case X86_INS_JGE:
-        case X86_INS_JMP:
-        case X86_INS_PCMPEQB:
-        case X86_INS_SHL:
-        case X86_INS_PMOVMSKB:
-        case X86_INS_BSF:
-        case X86_INS_NOP:
-        case X86_INS_CMOVS:
-        case X86_INS_CMOVB:
-        case X86_INS_CMOVE:
-        case X86_INS_JB:
-        case X86_INS_JA:
-        case X86_INS_SHR:
-        case X86_INS_SETNE:
-        case X86_INS_MOVZX:
-        case X86_INS_JNE:
-        case X86_INS_JG:
-        case X86_INS_INC:
-        case X86_INS_MOVSX:
-        case X86_INS_JNS:
-        case X86_INS_JLE:
-        case X86_INS_JS:
-        case X86_INS_DEC:
-        case X86_INS_JL:
-        case X86_INS_BT:
-        case X86_INS_JAE:
-        case X86_INS_CMPXCHG:
-        case X86_INS_XCHG:
-        case X86_INS_JBE:
-        case X86_INS_NEG:
-        case X86_INS_CMOVA:
-        case X86_INS_MOVDQU:
-        case X86_INS_MOVQ:
-        case X86_INS_PSRLDQ:
-        case X86_INS_MOVD:
-        case X86_INS_SBB:
-        case X86_INS_NOT:
-        case X86_INS_CWDE:
-        case X86_INS_IMUL:
-        case X86_INS_FLD:
-        case X86_INS_FSTP:
-        case X86_INS_FILD:
-        case X86_INS_FMUL:
-        case X86_INS_CMOVNE:
-        case X86_INS_CMOVGE:
-        case X86_INS_SAR:
-        case X86_INS_FLDZ:
-        case X86_INS_FXCH:
-        case X86_INS_MOVDQA:
-        case X86_INS_SETE:
-        case X86_INS_SETG:
-        case X86_INS_SETB:
-        case X86_INS_XORPS:
-        case X86_INS_MOVAPS:
-        case X86_INS_FNSTCW:
-        case X86_INS_FLDCW:
-        case X86_INS_FIST:
-        case X86_INS_FISTP:
-        case X86_INS_FADD:
-        case X86_INS_CWD:
-        case X86_INS_CDQ:
-        case X86_INS_SIDT:
-        case X86_INS_IDIV:
-        case X86_INS_SHLD:
-            break;
-            
-        default: unimplemented("of %s (%d)", I->mnemonic, I->id);
+        default: unimplemented("pf %s (%d)", I->mnemonic, I->id);
     }
     
     
@@ -167,8 +86,6 @@ void Inst::transfer(ArchState& arch, z3::solver& solver) const {
             break;
             
         case X86_INS_MOV:
-        case X86_INS_MOVD:
-        case X86_INS_MOVQ:
         case X86_INS_MOVDQU:
         case X86_INS_MOVDQA:
         case X86_INS_MOVAPS: {
@@ -176,6 +93,21 @@ void Inst::transfer(ArchState& arch, z3::solver& solver) const {
             const Operand dst {x86->operands[0]};
             const Operand src {x86->operands[1]};
             dst.write(arch, src.read(arch, solver), solver);
+            break;
+        }
+            
+        case X86_INS_MOVD:
+        case X86_INS_MOVQ: {
+            const Operand src {x86->operands[0]};
+            const Operand dst {x86->operands[1]};
+            z3::expr val = src.read(arch, solver);
+            if (dst.bits() > src.bits()) {
+                val = z3::zext(val, dst.bits() - src.bits());
+            }
+            if (src.bits() > dst.bits()) {
+                val = val.extract(dst.bits() - 1, 0);
+            }
+            dst.write(arch, val, solver);
             break;
         }
             
@@ -198,7 +130,8 @@ void Inst::transfer(ArchState& arch, z3::solver& solver) const {
         case X86_INS_CMOVE:
         case X86_INS_CMOVA:
         case X86_INS_CMOVNE:
-        case X86_INS_CMOVGE: {
+        case X86_INS_CMOVGE:
+        case X86_INS_CMOVNS: {
             using K = Condition::Kind;
             static const std::unordered_map<unsigned, Condition::Kind> cond_map = {
                 {X86_INS_CMOVS,  K::S},
@@ -207,6 +140,7 @@ void Inst::transfer(ArchState& arch, z3::solver& solver) const {
                 {X86_INS_CMOVA,  K::A},
                 {X86_INS_CMOVNE, K::NE},
                 {X86_INS_CMOVGE, K::GE},
+                {X86_INS_CMOVNS, K::NS},
             };
             const Condition cond {cond_map.at(I->id)};
             const Operand dst_op {x86->operands[0]};
@@ -521,6 +455,7 @@ void Inst::transfer(ArchState& arch, z3::solver& solver) const {
             break;
         }
             
+        case X86_INS_XORPD:
         case X86_INS_XORPS: {
             assert(x86->op_count == 2);
             const Operand dst {x86->operands[0]};
@@ -642,9 +577,64 @@ void Inst::transfer(ArchState& arch, z3::solver& solver) const {
                               z3::ite(cnt_val > 1, ctx.bv_val(0, 1), arch.of));
             break;
         }
+            
+        case X86_INS_PINSRB:
+        case X86_INS_PINSRD: {
+            const Operand dst {x86->operands[0]};
+            const Operand src {x86->operands[1]};
+            const uint8_t imm = x86->operands[2].imm;
+            z3::expr val = dst.read(arch, solver);
+            assert(val.get_sort().bv_size() == 128);
+        
+            const z3::expr src_val = src.read(arch, solver);
+            std::cerr << "val: " << val.get_sort().bv_size() << ", src_val: " << src_val.get_sort().bv_size() << ", lo: " << imm * src.bits() << "\n";
+            const z3::expr res = z3::bv_store(val, src_val, imm * src.bits());
+            dst.write(arch, res, solver);
+            break;
+        }
+            
+        case X86_INS_UCOMISD: {
+            const Operand src1 {x86->operands[0]};
+            const Operand src2 {x86->operands[1]};
+            
+            const unsigned bits = 64;
+            
+            z3::expr src1_val = src1.read(arch, solver);
+            z3::expr src2_val = src2.read(arch, solver);
+            
+            /* truncate values */
+            src1_val = z3::truncate(src1_val, bits);
+            src2_val = z3::truncate(src2_val, bits);
+            
+            const auto& fp_spec = arch.fpu.fp_ieee_bits.at(bits);
+            const z3::sort fp_sort = ctx.fpa_sort(fp_spec.first, fp_spec.second);
+            src1_val = src1_val.mk_from_ieee_bv(fp_sort);
+            src2_val = src2_val.mk_from_ieee_bv(fp_sort);
+            
+            const z3::expr unordered = z3::bool_to_bv(src1_val.mk_is_nan() || src2_val.mk_is_nan());
+            
+            /* set initial values */
+            arch.cf = z3::bool_to_bv(src1_val < src2_val);
+            arch.zf = z3::bool_to_bv(src1_val == src2_val);
+            
+            /* mask in unordered */
+            arch.cf = arch.cf | unordered;
+            arch.zf = arch.zf | unordered;
+            
+            /* reset other flags */
+            arch.of = ctx.bv_val(0, 1);
+            arch.sf = ctx.bv_val(0, 1);
+
+            break;
+        }
 
         default: unimplemented("%s", I->mnemonic);
     }
+    
+    // DEBUG
+    arch.for_each_xmm([&] (const auto p) {
+        assert((arch.*p).get_sort().bv_size() == 128);
+    });
     
     if (!eip) {
         eip = (arch.eip + I->size).simplify();
@@ -829,6 +819,7 @@ void Inst::transfer_jcc(ArchState& arch, z3::context& ctx, z3::solver& solver) c
         {X86_INS_JL,  K::L},
         {X86_INS_JAE, K::AE},
         {X86_INS_JBE, K::BE},
+        // {X86_INS_JNP, K::NP},
     };
     const Condition cond {cond_map.at(I->id)};
     

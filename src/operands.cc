@@ -53,6 +53,10 @@ z3::expr Operand::read(ArchState& arch, z3::solver& solver) const {
 }
 
 void Operand::write(ArchState& arch, const z3::expr& e, z3::solver& solver) const {
+    if (e.is_bv()) {
+        assert(bits() == e.get_sort().bv_size());
+    }
+    
     switch (op.type) {
         case X86_OP_REG:
             Register(op.reg).write(arch, e);
