@@ -80,6 +80,7 @@ private:
     void transfer_string_rep(ArchState& arch, z3::context& ctx, z3::solver& solver) const;
     void transfer_shift(unsigned id, ArchState& arch, z3::context& ctx, z3::solver& solver) const;
     void transfer_imul(ArchState& arch, z3::context& ctx, z3::solver& solver) const;
+    void transfer_cmp(ArchState& arch, const z3::expr& src1, const z3::expr& src2, z3::solver& solver) const;
 };
 
 inline std::ostream& operator<<(std::ostream& os, const Inst& x) {
@@ -101,6 +102,7 @@ struct Condition {
         L,
         AE, // CF == 0
         BE, // CF == 1 || ZF == 1
+        NP, // PF == 0
     } kind;
     
     Condition(Kind kind): kind(kind) {}

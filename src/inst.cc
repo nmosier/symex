@@ -20,6 +20,7 @@ const char *Condition::str() const {
         case L:  return "L";
         case AE: return "AE";
         case BE: return "BE";
+        case NP: return "NP";
         default: unimplemented("cc %d", kind);
     }
 }
@@ -38,17 +39,13 @@ z3::expr Condition::operator()(const ArchState& arch) const {
         case L:  return arch.sf != arch.of;
         case AE: return arch.cf == 0;
         case BE: return (arch.cf | arch.zf) == 1;
+        case NP: return arch.pf == 0;
         default: unimplemented("cc %s", str());
     }
 }
 
 
 void Inst::transfer(ArchState& arch, z3::solver& solver) const {
-    switch (I->id) {
-        default: unimplemented("pf %s (%d)", I->mnemonic, I->id);
-    }
-    
-    
     z3::context& ctx = arch.ctx();
     std::optional<z3::expr> eip;
     const auto nops = x86->op_count;
@@ -242,6 +239,7 @@ void Inst::transfer(ArchState& arch, z3::solver& solver) const {
         case X86_INS_JS:
         case X86_INS_JL:
         case X86_INS_JBE:
+        case X86_INS_JNP:
             transfer_jcc(arch, ctx, solver);
             eip = arch.eip;
             break;
@@ -282,10 +280,15 @@ void Inst::transfer(ArchState& arch, z3::solver& solver) const {
             transfer_shift(I->id, arch, ctx, solver);
             break;
             
-        case X86_INS_PSRLDQ:
+        case X86_INS_PSRLDQ: {
             assert(x86->op_count == 2);
-            transfer_shift(X86_INS_SHR, arch, ctx, solver);
+            const Operand acc {x86->operands[0]};
+            const uint8_t imm = x86->operands[1].imm;
+            const z3::expr acc_val = acc.read(arch, solver);
+            const z3::expr res = z3::lshr(acc_val, imm);
+            acc.write(arch, res, solver);
             break;
+        }
             
         case X86_INS_MOVSB:
             transfer_string_rep(arch, ctx, solver);
@@ -320,6 +323,7 @@ void Inst::transfer(ArchState& arch, z3::solver& solver) const {
             const unsigned hi = acc_op.bits() - 1;
             arch.zf = ~z3::bvredor(res);
             arch.sf = acc.extract(hi, hi);
+            arch.set_pf(res);
             break;
         }
             
@@ -357,8 +361,10 @@ void Inst::transfer(ArchState& arch, z3::solver& solver) const {
             }
             const Register acc_op {acc_reg};
             const z3::expr acc_val = acc_op.read(arch);
+            
+            transfer_cmp(arch, acc_val, mem_val, solver); // this sets the flags properly
+
             const z3::expr eq = (mem_val == acc_val);
-            arch.zf = z3::bool_to_bv(eq);
             mem_op.write(arch, z3::ite(eq, reg_op.read(arch), mem_val), solver);
             acc_op.write(arch, z3::ite(eq, acc_val, mem_val));
             break;
@@ -570,11 +576,16 @@ void Inst::transfer(ArchState& arch, z3::solver& solver) const {
             const z3::expr cnt_val_z = z3::zext(cnt_val, dst.bits() - cnt.bits());
             const z3::expr res = z3::concat(dst_val, src_val).extract(dst.bits() - 1, 0);
             dst.write(arch, res, solver);
-            arch.cf = z3::ite(cnt_val == 0, arch.cf, z3::bvsign(z3::shl(dst_val, cnt_val_z - 1)));
+            
+            arch.cf = z3::bvsign(z3::shl(dst_val, cnt_val_z - 1));
             arch.of = z3::ite(cnt_val == 1,
                               dst_val.extract(dst.bits() - 1, dst.bits() - 1) ^
                               dst_val.extract(dst.bits() - 2, dst.bits() - 2),
-                              z3::ite(cnt_val > 1, ctx.bv_val(0, 1), arch.of));
+                              ctx.bv_val(0, 1));
+            arch.pf = z3::ite(cnt_val == 0, arch.pf, arch.get_pf(res));
+            arch.sf = z3::ite(cnt_val == 0, arch.sf, arch.get_sf(res));
+            arch.zf = z3::ite(cnt_val == 0, arch.zf, arch.get_zf(res));
+            
             break;
         }
             
@@ -620,6 +631,7 @@ void Inst::transfer(ArchState& arch, z3::solver& solver) const {
             /* mask in unordered */
             arch.cf = arch.cf | unordered;
             arch.zf = arch.zf | unordered;
+            arch.pf = unordered;
             
             /* reset other flags */
             arch.of = ctx.bv_val(0, 1);
@@ -643,7 +655,7 @@ void Inst::transfer(ArchState& arch, z3::solver& solver) const {
 }
 
 z3::expr Inst::transfer_acc_src_arith(unsigned id, ArchState& arch, z3::context& ctx, const z3::expr& acc,
-                                  const z3::expr& src, unsigned bits) const {
+                                      const z3::expr& src, unsigned bits) const {
     z3::expr res {ctx};
     z3::expr res_x {ctx};
     
@@ -667,6 +679,7 @@ z3::expr Inst::transfer_acc_src_arith(unsigned id, ArchState& arch, z3::context&
     arch.cf = res_x.extract(bits, bits);
     arch.zf = ~z3::bvredor(res);
     arch.sf = z3::bvsign(res);
+    arch.set_pf(res);
     
     return res;
 }
@@ -699,6 +712,7 @@ z3::expr Inst::transfer_acc_src_logic(unsigned id, ArchState& arch, z3::context&
             arch.zf = ~z3::bvredor(res);
             arch.sf = res.extract(bits - 1, bits - 1);
             arch.of = ctx.bv_val(0, 1);
+            arch.set_pf(res);
             break;
         case X86_INS_PXOR:
             break;
@@ -708,6 +722,7 @@ z3::expr Inst::transfer_acc_src_logic(unsigned id, ArchState& arch, z3::context&
     return res;
 }
 
+// TODO: get rid of this.
 void Inst::transfer_acc_src(ArchState& arch, z3::solver& solver) const {
     z3::context& ctx = arch.ctx();
     const Operand acc_op {I->detail->x86.operands[0]};
@@ -819,7 +834,7 @@ void Inst::transfer_jcc(ArchState& arch, z3::context& ctx, z3::solver& solver) c
         {X86_INS_JL,  K::L},
         {X86_INS_JAE, K::AE},
         {X86_INS_JBE, K::BE},
-        // {X86_INS_JNP, K::NP},
+        {X86_INS_JNP, K::NP},
     };
     const Condition cond {cond_map.at(I->id)};
     
@@ -899,8 +914,14 @@ void Inst::transfer_shift(unsigned id, ArchState& arch, z3::context& ctx, z3::so
     
     arch.sf = z3::bvsign(res);
     arch.zf = ~z3::bvredor(res);
+    arch.set_pf(res);
     
     acc_op.write(arch, res, solver);
+}
+
+void Inst::transfer_cmp(ArchState& arch, const z3::expr& src1, const z3::expr& src2, z3::solver& solver) const {
+    z3::context& ctx = src1.ctx();
+    transfer_acc_src_arith(X86_INS_SUB, arch, ctx, src1, src2, src1.get_sort().bv_size());
 }
 
 }

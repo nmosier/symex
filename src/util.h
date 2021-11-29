@@ -283,6 +283,29 @@ inline z3::expr truncate(const z3::expr& bv, unsigned bits) {
     }
 }
 
+inline z3::expr bvredxor(const z3::expr& src) {
+    z3::context& ctx = src.ctx();
+    z3::expr acc = ctx.bv_val(0, 1);
+    assert(src.is_bv());
+    for (unsigned i = 0; i < src.get_sort().bv_size(); ++i) {
+        acc = acc ^ src.extract(i, i);
+    }
+    return acc;
+}
+
+#if 0
+inline z3::expr lshr(const z3::expr& src, unsigned count) {
+    assert(src.is_bv());
+    const unsigned bits = src.get_sort().bv_size();
+    z3::context& ctx = src.ctx();
+    if (count >= bits) {
+        return ctx.bv_val(0, bits);
+    } else {
+        return z3::zext(src.extract(bits - 1, count), count);
+    }
+}
+#endif
+
 }
 
 

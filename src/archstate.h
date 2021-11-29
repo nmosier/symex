@@ -20,7 +20,8 @@ XE(eip, 32)
 XB(cf, 1, 0)                    \
 XB(zf, 1, 6)                    \
 XB(sf, 1, 7) \
-XE(of, 1, 11)
+XB(of, 1, 11) \
+XE(pf, 1, 4)
 
 #define X_x86_XMMS(XB, XE) \
 XB(xmm0, 128) \
@@ -146,6 +147,31 @@ struct ArchState {
     }
     
     void stackdump(unsigned words, const z3::eval& eval) const;
+    
+    z3::expr get_pf(const z3::expr& x) const {
+        return ~z3::bvredxor(x.extract(7, 0));
+    }
+    
+    z3::expr get_sf(const z3::expr& x) const {
+        const unsigned bits = x.get_sort().bv_size();
+        return x.extract(bits - 1, bits - 1);
+    }
+    
+    z3::expr get_zf(const z3::expr& x) const {
+        return ~z3::bvredor(x);
+    }
+    
+    void set_pf(const z3::expr& x) {
+        pf = get_pf(x);
+    }
+    
+    void set_sf(const z3::expr& x) {
+        sf = get_sf(x);
+    }
+    
+    void set_zf(const z3::expr& x) {
+        zf = get_zf(x);
+    }
 };
 
 std::ostream& operator<<(std::ostream& os, const ArchState& arch);
