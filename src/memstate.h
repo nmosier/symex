@@ -299,6 +299,8 @@ private:
     z3::expr read_byte(const z3::expr& sym_addr, const std::vector<z3::expr>& con_addrs);
     void write_byte(const z3::expr& sym_addr, const std::vector<z3::expr>& con_addrs, const z3::expr& sym_data);
     void check() const;
+    
+    uint8_t core_read(uint64_t addr) const;
 };
 
 

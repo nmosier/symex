@@ -66,4 +66,15 @@ void ArchState::stackdump(unsigned words, const z3::eval& eval) const {
 }
 #endif
 
+
+ArchState ArchState::eval(const z3::model& model) const {
+    ArchState res = *this;
+    
+#define ENT(name, ...) res.name = model.eval(res.name, true);
+    X_x86_ALL(ENT, ENT);
+#undef ENT
+    
+    return res;
+}
+
 }

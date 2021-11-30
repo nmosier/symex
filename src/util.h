@@ -422,4 +422,24 @@ std::ostream& print(std::ostream& os, const Container& container) {
     return os;
 }
 
+
+namespace detail {
+template <class Container, typename T>
+struct push_scope_impl {
+    Container& container;
+    push_scope_impl(Container& container, const T& x): container(container) {
+        container.push_back(x);
+    }
+    ~push_scope_impl() {
+        container.pop_back();
+    }
+};
+}
+
+template <class Container, typename T>
+auto scoped_push(Container& container, const T& x) {
+    return detail::push_scope_impl<Container, T>(container, x);
+}
+
+
 }

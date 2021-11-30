@@ -8,10 +8,12 @@
 #include "util.h"
 #include "peephole.h"
 #include "config.h"
+#include "exception.h"
 
 namespace x86 {
 
-void Context::dump_trace(const z3::model& model) {
+void Context::dump_trace(const z3::model& model, const ArchState& arch_) {
+    const ArchState arch = arch_.eval(model);
     std::stringstream ss;
     ss << "trace" << trace_counter++ << ".asm";
     std::ofstream ofs {ss.str()};
@@ -33,6 +35,9 @@ void Context::dump_trace(const z3::model& model) {
     for (const cs_insn *I : trace) {
         ofs << std::hex << I->address << ": " << I->mnemonic << " " << I->op_str << "\n";
     }
+    
+    /* print out state */
+    ofs << arch << "\n";
 
     std::cerr << "dumped trace to " << ss.str() << "\n";
 }
@@ -50,7 +55,7 @@ void Context::explore_paths_rec(Program& program, const ArchState& in_arch, z3::
         if (seg_it == core.segments_end()) {
             std::cerr << "jump outside of address space: " << std::hex << addr << "\n";
             if (solver.check() != z3::sat) { std::abort(); }
-            dump_trace(solver.get_model());
+            dump_trace(solver.get_model(), in_arch);
             return;
         }
         // TODO: make this safer
@@ -60,18 +65,26 @@ void Context::explore_paths_rec(Program& program, const ArchState& in_arch, z3::
     
     const Inst& inst = program.map.at(addr);
     
-    trace.push_back(inst.I);
+    const auto trace_push = util::scoped_push(trace, inst.I);
     
     ArchState arch = in_arch;
     
-    const auto transfer_it = transfers.find(addr);
-    if (transfer_it == transfers.end()) {
-        inst.transfer(arch, solver);
-    } else {
-        transfer_it->second(arch, solver, core);
+    try {
+        
+        const auto transfer_it = transfers.find(addr);
+        if (transfer_it == transfers.end()) {
+            inst.transfer(arch, solver);
+        } else {
+            transfer_it->second(arch, solver, core);
+        }
+        
+    } catch (const exception& e) {
+        std::cerr << e << "\n";
+        solver.check();
+        std::cerr << trace_counter << "\n";
+        dump_trace(solver.get_model(), in_arch);
+        return;
     }
-    
-    
     
     ArchState out_arch = arch;
     // out_arch.create(next_id++, solver);
@@ -81,8 +94,6 @@ void Context::explore_paths_rec(Program& program, const ArchState& in_arch, z3::
     I = inst.I;
     
     explore_paths_rec_dst(program, in_arch, out_arch, solver);
-    
-    trace.pop_back();
 }
 
 void Context::explore_paths() {

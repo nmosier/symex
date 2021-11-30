@@ -122,7 +122,7 @@ struct Context {
     void check_regs(const ArchState& arch);
     
     unsigned trace_counter = 0;
-    void dump_trace(const z3::model& model);
+    void dump_trace(const z3::model& model, const ArchState& arch);
     
     void bind_abstract_transfers() {
 #if 0

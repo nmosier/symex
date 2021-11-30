@@ -172,6 +172,8 @@ struct ArchState {
     void set_zf(const z3::expr& x) {
         zf = get_zf(x);
     }
+    
+    ArchState eval(const z3::model& model) const;
 };
 
 std::ostream& operator<<(std::ostream& os, const ArchState& arch);
