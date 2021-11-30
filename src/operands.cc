@@ -90,7 +90,8 @@ z3::expr Register::read(const ArchState& arch) const {
         case X86_REG_AX: return arch.eax.extract(15, 0);
         case X86_REG_CX: return arch.ecx.extract(15, 0);
         case X86_REG_DX: return arch.edx.extract(15, 0);
-            
+        case X86_REG_DI: return arch.edi.extract(15, 0);
+
         case X86_REG_AL: return arch.eax.extract(7, 0);
         case X86_REG_BL: return arch.ebx.extract(7, 0);
         case X86_REG_CL: return arch.ecx.extract(7, 0);
@@ -158,6 +159,7 @@ void Register::write(ArchState& arch, const z3::expr& e) const {
             
         case X86_REG_CX: arch.ecx = z3::bv_store(arch.ecx, e, 0); break;
         case X86_REG_DX: arch.edx = z3::bv_store(arch.edx, e, 0); break;
+        case X86_REG_DI: arch.edi = z3::bv_store(arch.edi, e, 0); break;
             
         case X86_REG_ST0:
         case X86_REG_ST1:

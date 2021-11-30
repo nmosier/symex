@@ -1,6 +1,7 @@
 #include <fstream>
 #include <sstream>
 #include <gperftools/profiler.h>
+#include <unistd.h>
 
 #include "x86.h"
 #include "program.h"
@@ -15,8 +16,19 @@ namespace x86 {
 void Context::dump_trace(const z3::model& model, const ArchState& arch_) {
     const ArchState arch = arch_.eval(model);
     std::stringstream ss;
+#if 0
     ss << "trace" << trace_counter++ << ".asm";
     std::ofstream ofs {ss.str()};
+#else
+    std::ofstream ofs;
+    while (true) {
+        char path[] = "trace-XXXX";
+        if (::mktemp(path) == nullptr) {
+            throw std::system_error(errno, std::generic_category(), "mktemp");
+        }
+        ofs.open(path);
+    }
+#endif
     
     /* print out symbolic ranges */
     const auto init_mem = MemState::get_init_mem(ctx);
@@ -157,34 +169,19 @@ void Context::explore_paths_rec_dst(Program& program, const ArchState& in_arch, 
         
     } else {
         
-        unsigned count = 0;
-        while (true) {
-            const z3::check_result res = solver.check();
-            if (res != z3::sat) {
-                const auto core = solver.unsat_core();
-                for (const auto& e : core) {
-                    std::cerr << e << "\n";
-                }
-                break;
-            }
-            
-            if (conf::deterministic && count > 0) {
-                std::cerr << "error: nondeterministic\n";
-                std::abort();
-            }
-            
-            const z3::model model = solver.get_model();
-            const z3::expr eip = model.eval(out_arch.eip, true);
-            // std::cerr << "dst " << eip << "\n";
-
-            solver.push();
-            {
-                solver.add(eip == out_arch.eip);
-                explore_paths_rec(program, out_arch, solver, eip.get_numeral_uint64());
-            }
-            solver.pop();
-            solver.add(eip != out_arch.eip);
-            ++count;
+        std::vector<z3::expr> con_eips;
+        z3::enumerate(solver, out_arch.eip, std::back_inserter(con_eips));
+        const unsigned count = con_eips.size();
+        
+        if (conf::deterministic && count > 0) {
+            std::cerr << "error: nondeterministic\n";
+            std::abort();
+        }
+        
+        for (const z3::expr& con_eip : con_eips) {
+            const z3::scope scope {solver};
+            solver.add(out_arch.eip == con_eip);
+            explore_paths_rec(program, out_arch, solver, con_eip.get_numeral_uint64());
         }
         
     }

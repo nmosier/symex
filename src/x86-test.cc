@@ -31,6 +31,7 @@ Options:
  -h               show help
  -s <addr>,<len>  make memory range symbolic
  -e <entrypoint>  override entrypoint (eip)
+ -j <threads>     maximum number of threads to use
 )=";
     fprintf(f, s, prog);
 }
@@ -48,11 +49,12 @@ int main(int argc, char *argv[]) {
     prog = argv[0];
     
     int optc;
-    while ((optc = getopt(argc, argv, "hs:e:")) >= 0) {
+    while ((optc = getopt(argc, argv, "hs:e:j:")) >= 0) {
         switch (optc) {
             case 'h':
                 usage(stdout);
                 return EXIT_SUCCESS;
+                
             case 's': {
                 const char *base_s = strsep(&optarg, ",");
                 const char *len_s = optarg;
@@ -64,6 +66,7 @@ int main(int argc, char *argv[]) {
                 conf::deterministic = false;
                 break;
             }
+                
             case 'e': {
                 char *end;
                 conf::entrypoint = std::strtoul(optarg, &end, 0);
@@ -73,6 +76,12 @@ int main(int argc, char *argv[]) {
                 }       
                 break;
             }
+                
+            case 'j': {
+                conf::pool.open(std::stoul(optarg));
+                break;
+            }
+                
             default:
                 usage();
                 return EXIT_FAILURE;

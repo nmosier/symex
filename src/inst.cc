@@ -3,6 +3,7 @@
 #include "inst.h"
 #include "util.h"
 #include "operands.h"
+#include "exception.h"
 
 namespace x86 {
 
@@ -152,6 +153,7 @@ void Inst::transfer(ArchState& arch, z3::solver& solver) const {
         case X86_INS_CMOVNE:
         case X86_INS_CMOVGE:
         case X86_INS_CMOVNS:
+        case X86_INS_CMOVBE:
         case X86_INS_CMOVG: {
             using K = Condition::Kind;
             static const std::unordered_map<unsigned, Condition::Kind> cond_map = {
@@ -163,6 +165,7 @@ void Inst::transfer(ArchState& arch, z3::solver& solver) const {
                 {X86_INS_CMOVGE, K::GE},
                 {X86_INS_CMOVNS, K::NS},
                 {X86_INS_CMOVG,  K::G},
+                {X86_INS_CMOVBE, K::BE},
             };
             const Condition cond {cond_map.at(I->id)};
             const Operand dst_op {x86->operands[0]};
@@ -679,6 +682,31 @@ void Inst::transfer(ArchState& arch, z3::solver& solver) const {
             dst.write(arch, res, solver);
             break;
         }
+            
+        case X86_INS_ROL: {
+            assert(x86->op_count == 2);
+            assert(x86->operands[1].type == X86_OP_REG);
+            
+            const Operand acc {x86->operands[0]};
+            const Operand cnt {x86->operands[1]};
+            
+            const z3::expr acc_val = acc.read(arch, solver);
+            const z3::expr cnt_val = cnt.read(arch, solver) & 0b11111;
+
+            const z3::expr res = transfer_rotate_left(arch, acc_val, cnt_val);
+            acc.write(arch, res, solver);
+            
+            arch.cf = z3::ite(cnt_val == 0, arch.cf, z3::bvsign(transfer_rotate_left(arch, acc_val, cnt_val - 1)));
+            arch.of = z3::ite(cnt_val == 0, arch.of,
+                              z3::ite(cnt_val == 1, arch.cf ^ z3::bvsign(res), ctx.bv_val(0, 1)));
+            break;
+        }
+            
+            
+            
+            /* IGNORED */
+        case X86_INS_SYSENTER:
+            throw ignored_instruction(ctx, I);
 
         default: unimplemented("%s", I->mnemonic);
     }
@@ -692,6 +720,12 @@ void Inst::transfer(ArchState& arch, z3::solver& solver) const {
         eip = (arch.eip + I->size).simplify();
     }
     arch.eip = *eip;
+}
+
+z3::expr Inst::transfer_rotate_left(ArchState& arch, const z3::expr& acc, const z3::expr& cnt) const {
+    const unsigned bits = acc.get_sort().bv_size();
+    const z3::expr cnt_x = z3::zext(cnt, bits - cnt.get_sort().bv_size());
+    return z3::shl(acc, cnt_x) | z3::lshr(acc, static_cast<int>(bits) - cnt_x);
 }
 
 z3::expr Inst::transfer_acc_src_arith(unsigned id, ArchState& arch, z3::context& ctx, const z3::expr& acc,
@@ -935,18 +969,6 @@ void Inst::transfer_jcc(ArchState& arch, z3::context& ctx, z3::solver& solver) c
     const Condition cond {cond_map.at(I->id)};
     
     arch.eip = z3::ite(cond(arch), taken, not_taken);
-}
-
-void Inst::transfer_cmovcc(ArchState& arch, z3::context& ctx, z3::solver& solver) const {
-    const Operand dst {x86->operands[0]};
-    const Operand src {x86->operands[1]};
-    using K = Condition::Kind;
-    static const std::unordered_map<unsigned, Condition::Kind> cond_map = {
-        {X86_INS_CMOVA, K::A},
-    };
-    const Condition cond {cond_map.at(I->id)};
-    const z3::expr value = z3::ite(cond(arch), src.read(arch, solver), dst.read(arch, solver));
-    dst.write(arch, value, solver);
 }
 
 void Inst::transfer_string(ArchState& arch, z3::context& ctx, z3::solver& solver) const {

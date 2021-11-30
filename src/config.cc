@@ -8,4 +8,6 @@ bool deterministic = true;
 std::vector<x86::MemoryRange> symbolic_ranges;
 std::optional<uint64_t> entrypoint;
 
+ThreadPool pool;
+
 }

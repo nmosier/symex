@@ -26,6 +26,7 @@ add_executable(x86-test
   fpu.cc fpu.h
   value.cc value.h
   exception.h
+  pool.h
   $<TARGET_OBJECTS:cores_old>
   )
 target_link_libraries(x86-test PRIVATE cores)

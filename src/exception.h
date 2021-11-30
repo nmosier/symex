@@ -1,5 +1,7 @@
 #pragma once
 
+#include <string>
+
 #include <z3++.h>
 
 namespace x86 {
@@ -32,6 +34,19 @@ struct segfault: exception {
     
     virtual const char *what() const override {
         return "segfault";
+    }
+};
+
+struct ignored_instruction: exception {
+    const cs_insn *I;
+    std::string s;
+    
+    ignored_instruction(z3::context& ctx, const cs_insn *I): exception(ctx), I(I) {
+        s = std::string(I->mnemonic) + " " + I->op_str;
+    }
+    
+    virtual const char *what() const {
+        return s.c_str();
     }
 };
 
