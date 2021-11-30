@@ -67,6 +67,9 @@ z3::expr MemState::read_byte(const z3::expr& sym_addr, const std::vector<z3::exp
         }
         std::cerr << "\n";
         
+        /* commit write(s) if necessary and add to symbolic mask */
+        initialize(sym_addr, con_addrs);
+        
         /* read is symbolic: can source many locations */
         return sym_mem[sym_addr];
         
@@ -77,6 +80,16 @@ void MemState::write_byte(const z3::expr& sym_addr, const std::vector<z3::expr>&
     check();
     const auto chk = util::defer([&] () { check(); });
     assert(!con_addrs.empty());
+    
+    /* check if write addresses cause segfault */
+    for (const z3::expr& con_addr : con_addrs) {
+        const uint64_t int_addr = con_addr.get_numeral_uint64();
+        const auto prot = core.prot(int_addr);
+        if (!(prot & PROT_WRITE)) {
+            throw segfault(con_addr);
+        }
+    }
+    
     
     /* check if write address can be concretized */
     if (con_addrs.size() == 1) {
@@ -101,28 +114,35 @@ void MemState::write_byte(const z3::expr& sym_addr, const std::vector<z3::expr>&
         std::cerr << "SYMBOLIC-WRITE\n";
         
         /* commit write(s) if necessary and add to symbolic mask */
-        for (const z3::expr& con_addr : con_addrs) {
-            const uint64_t int_addr = con_addr.get_numeral_uint64();
-            if (uncommitted_writes.erase(int_addr)) {
-                /* commit write from con_mem to sym_mem */
-                const auto con_mem_it = con_mem.find(int_addr);
-                assert(con_mem_it != con_mem.end());
-                sym_mem = z3::store(sym_mem, con_addr, con_mem_it->second);
-                con_mem.erase(con_mem_it);
-            } else if (init.insert(int_addr).second) {
-                /* initialize write in sym_mem */
-                const uint8_t con_data = core_read(int_addr);
-                const z3::expr sym_data = ctx().bv_val(con_data, 8);
-                sym_mem = z3::store(sym_mem, con_addr, sym_data);
-            }
-            sym_writes.insert(int_addr);
-        }
+        initialize(sym_addr, con_addrs);
         
         /* update symbolic memory */
         sym_mem = z3::store(sym_mem, sym_addr, sym_data);
         
     }
     
+}
+
+void MemState::initialize(const z3::expr& sym_addr, const std::vector<z3::expr>& con_addrs) {
+    assert(con_addrs.size() > 1);
+    
+    /* commit write(s) if necessary and add to symbolic mask */
+    for (const z3::expr& con_addr : con_addrs) {
+        const uint64_t int_addr = con_addr.get_numeral_uint64();
+        if (uncommitted_writes.erase(int_addr)) {
+            /* commit write from con_mem to sym_mem */
+            const auto con_mem_it = con_mem.find(int_addr);
+            assert(con_mem_it != con_mem.end());
+            sym_mem = z3::store(sym_mem, con_addr, con_mem_it->second);
+            con_mem.erase(con_mem_it);
+        } else if (init.insert(int_addr).second) {
+            /* initialize write in sym_mem */
+            const uint8_t con_data = core_read(int_addr);
+            const z3::expr sym_data = ctx().bv_val(con_data, 8);
+            sym_mem = z3::store(sym_mem, con_addr, sym_data);
+        }
+        sym_writes.insert(int_addr);
+    }
 }
 
 uint8_t MemState::core_read(uint64_t addr) const {

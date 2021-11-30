@@ -80,6 +80,8 @@ private:
     void transfer_string_rep(ArchState& arch, z3::context& ctx, z3::solver& solver) const;
     void transfer_shift(unsigned id, ArchState& arch, z3::context& ctx, z3::solver& solver) const;
     void transfer_imul(ArchState& arch, z3::context& ctx, z3::solver& solver) const;
+    void transfer_mul(ArchState& arch, z3::context& ctx, z3::solver& solver) const;
+    void transfer_mul_imul_1(ArchState& arch, z3::context& ctx, z3::solver& solver, z3::expr (*ext)(const z3::expr&, unsigned)) const;
     void transfer_cmp(ArchState& arch, const z3::expr& src1, const z3::expr& src2, z3::solver& solver) const;
 };
 
