@@ -13,7 +13,7 @@
 
 namespace x86 {
 
-void Context::dump_trace(const z3::model& model, const ArchState& arch_) {
+void Context::dump_trace(const z3::model& model, const ArchState& arch_, const std::string& reason) {
     const ArchState arch = arch_.eval(model);
     std::stringstream ss;
 #if 0
@@ -26,7 +26,18 @@ void Context::dump_trace(const z3::model& model, const ArchState& arch_) {
         if (::mktemp(path) == nullptr) {
             throw std::system_error(errno, std::generic_category(), "mktemp");
         }
+        
+        int fd;
+        if ((fd = ::open(path, O_WRONLY | O_CREAT | O_EXCL, 0664)) < 0) {
+            if (errno == EEXIST) {
+                continue;
+            }
+            throw std::system_error(errno, std::generic_category(), "open");
+        }
+        ::close(fd);
+        ss << path;
         ofs.open(path);
+        break;
     }
 #endif
     
@@ -43,6 +54,9 @@ void Context::dump_trace(const z3::model& model, const ArchState& arch_) {
         }
     }
     
+    /* print out reason */
+    ofs << "\n" << reason << "\n";
+    
     /* print out instructions */
     for (const cs_insn *I : trace) {
         ofs << std::hex << I->address << ": " << I->mnemonic << " " << I->op_str << "\n";
@@ -50,7 +64,7 @@ void Context::dump_trace(const z3::model& model, const ArchState& arch_) {
     
     /* print out state */
     ofs << arch << "\n";
-
+    
     std::cerr << "dumped trace to " << ss.str() << "\n";
 }
 
@@ -67,9 +81,15 @@ void Context::explore_paths_rec(Program& program, const ArchState& in_arch, z3::
         if (seg_it == core.segments_end()) {
             std::cerr << "jump outside of address space: " << std::hex << addr << "\n";
             if (solver.check() != z3::sat) { std::abort(); }
-            dump_trace(solver.get_model(), in_arch);
+            dump_trace(solver.get_model(), in_arch, "jump outside address space\n");
             return;
         }
+        
+        /* check if executable */
+        if (!(seg_it->prot & PROT_EXEC)) {
+            throw segfault(in_arch.eip);
+        }
+        
         // TODO: make this safer
         const void *data = seg_it->at(addr);
         program.disasm((const uint8_t *) data, 16, addr, 1);
@@ -94,7 +114,7 @@ void Context::explore_paths_rec(Program& program, const ArchState& in_arch, z3::
         std::cerr << e << "\n";
         solver.check();
         std::cerr << trace_counter << "\n";
-        dump_trace(solver.get_model(), in_arch);
+        dump_trace(solver.get_model(), in_arch, e.str());
         return;
     }
     
@@ -178,10 +198,52 @@ void Context::explore_paths_rec_dst(Program& program, const ArchState& in_arch, 
             std::abort();
         }
         
-        for (const z3::expr& con_eip : con_eips) {
-            const z3::scope scope {solver};
-            solver.add(out_arch.eip == con_eip);
-            explore_paths_rec(program, out_arch, solver, con_eip.get_numeral_uint64());
+        if (conf::parallel) {
+            
+#if 0
+            std::cerr << "THREADS: " << conf::pool.get() << "\n";
+#endif
+            
+            for (auto con_eip_it = std::next(con_eips.begin()); con_eip_it != con_eips.end(); ++con_eip_it) {
+                const auto& con_eip = *con_eip_it;
+                
+                const pid_t pid = ::fork();
+                if (pid < 0) {
+                    throw std::system_error(errno, std::generic_category(), "fork");
+                } else if (pid == 0) {
+                    conf::pool.dec();
+                    solver.add(out_arch.eip == con_eip);
+                    explore_paths_rec(program, out_arch, solver, con_eip.get_numeral_uint64());
+                    std::exit(0);
+                }
+            }
+            
+            {
+                const z3::expr& con_eip = con_eips.front();
+                solver.add(out_arch.eip == con_eip);
+                explore_paths_rec(program, out_arch, solver, con_eip.get_numeral_uint64());
+            }
+            
+            conf::pool.inc();
+            
+            for (std::size_t i = 1; i < con_eips.size(); ++i) {
+                while (::wait(nullptr) < 0) {
+                    if (errno != EINTR && errno != EAGAIN) {
+                        throw std::system_error(errno, std::generic_category(), "wait");
+                    }
+                }
+            }
+            
+            conf::pool.dec();
+            
+        } else {
+            
+            for (const z3::expr& con_eip : con_eips) {
+                const z3::scope scope {solver};
+                solver.add(out_arch.eip == con_eip);
+                explore_paths_rec(program, out_arch, solver, con_eip.get_numeral_uint64());
+            }
+            
         }
         
     }

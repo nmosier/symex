@@ -106,6 +106,7 @@ struct Condition {
         AE, // CF == 0
         BE, // CF == 1 || ZF == 1
         NP, // PF == 0
+        P,  // PF == 1
     } kind;
     
     Condition(Kind kind): kind(kind) {}

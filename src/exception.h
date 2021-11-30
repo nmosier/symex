@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <sstream>
 
 #include <z3++.h>
 
@@ -19,6 +20,12 @@ struct exception {
     
     void print(std::ostream& os) const {
         os << "BUG: " << what() << ": " << vec << "\n";
+    }
+    
+    std::string str() const {
+        std::stringstream ss;
+        print(ss);
+        return ss.str();
     }
 };
 
@@ -42,7 +49,7 @@ struct ignored_instruction: exception {
     std::string s;
     
     ignored_instruction(z3::context& ctx, const cs_insn *I): exception(ctx), I(I) {
-        s = std::string(I->mnemonic) + " " + I->op_str;
+        s = std::string("ignored: ") + I->mnemonic + " " + I->op_str;
     }
     
     virtual const char *what() const {

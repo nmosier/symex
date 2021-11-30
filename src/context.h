@@ -78,7 +78,7 @@ struct Context {
     std::vector<const cs_insn *> trace;
     std::unordered_map<addr_t, transfer::transfer_function_t *> transfers;
     
-    ~Context() { std::cerr << "trace " << trace.size() << "\n"; }
+    ~Context() { std::cerr << "Traces: " << trace_counter << "\n"; }
     
     const z3::expr zero;
     
@@ -122,7 +122,7 @@ struct Context {
     void check_regs(const ArchState& arch);
     
     unsigned trace_counter = 0;
-    void dump_trace(const z3::model& model, const ArchState& arch);
+    void dump_trace(const z3::model& model, const ArchState& arch, const std::string& reason);
     
     void bind_abstract_transfers() {
 #if 0

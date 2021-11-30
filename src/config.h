@@ -19,5 +19,6 @@ extern std::vector<x86::MemoryRange> symbolic_ranges;
 extern std::optional<uint64_t> entrypoint;
 
 extern ThreadPool pool;
+extern bool parallel;
 
 }

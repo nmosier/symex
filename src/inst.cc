@@ -22,6 +22,7 @@ const char *Condition::str() const {
         case AE: return "AE";
         case BE: return "BE";
         case NP: return "NP";
+        case P:  return "P";
         default: unimplemented("cc %d", kind);
     }
 }
@@ -41,6 +42,7 @@ z3::expr Condition::operator()(const ArchState& arch) const {
         case AE: return arch.cf == 0;
         case BE: return (arch.cf | arch.zf) == 1;
         case NP: return arch.pf == 0;
+        case P:  return arch.pf == 1;
         default: unimplemented("cc %s", str());
     }
 }
@@ -154,7 +156,8 @@ void Inst::transfer(ArchState& arch, z3::solver& solver) const {
         case X86_INS_CMOVGE:
         case X86_INS_CMOVNS:
         case X86_INS_CMOVBE:
-        case X86_INS_CMOVG: {
+        case X86_INS_CMOVG:
+        case X86_INS_CMOVL: {
             using K = Condition::Kind;
             static const std::unordered_map<unsigned, Condition::Kind> cond_map = {
                 {X86_INS_CMOVS,  K::S},
@@ -166,6 +169,7 @@ void Inst::transfer(ArchState& arch, z3::solver& solver) const {
                 {X86_INS_CMOVNS, K::NS},
                 {X86_INS_CMOVG,  K::G},
                 {X86_INS_CMOVBE, K::BE},
+                {X86_INS_CMOVL,  K::L},
             };
             const Condition cond {cond_map.at(I->id)};
             const Operand dst_op {x86->operands[0]};
@@ -222,10 +226,17 @@ void Inst::transfer(ArchState& arch, z3::solver& solver) const {
             
             
             
-        case X86_INS_RET:
+        case X86_INS_RET: {
             eip = arch.mem.read(arch.esp, 4, solver);
-            arch.esp = arch.esp + 4;
+            uint64_t pop_count = 4;
+            switch (x86->op_count) {
+                case 0: break;
+                case 1: pop_count += x86->operands[0].imm; break;
+                default: std::abort();
+            }
+            arch.esp = arch.esp + ctx.bv_val(pop_count, 32);
             break;
+        }
             
         case X86_INS_POP: {
             const Operand op {I->detail->x86.operands[0]};
@@ -275,7 +286,8 @@ void Inst::transfer(ArchState& arch, z3::solver& solver) const {
         case X86_INS_SETNE:
         case X86_INS_SETE:
         case X86_INS_SETG:
-        case X86_INS_SETB: {
+        case X86_INS_SETB:
+        case X86_INS_SETP: {
             const Operand acc_op {x86->operands[0]};
             using K = Condition::Kind;
             static const std::unordered_map<unsigned, K> map = {
@@ -283,6 +295,7 @@ void Inst::transfer(ArchState& arch, z3::solver& solver) const {
                 {X86_INS_SETE,  K::E},
                 {X86_INS_SETG,  K::G},
                 {X86_INS_SETB,  K::B},
+                {X86_INS_SETP,  K::P},
             };
             const Condition cond {map.at(I->id)};
             const z3::expr cc = cond(arch);
@@ -356,6 +369,11 @@ void Inst::transfer(ArchState& arch, z3::solver& solver) const {
             arch.zf = ~z3::bvredor(res);
             arch.sf = acc.extract(hi, hi);
             arch.set_pf(res);
+            break;
+        }
+            
+        case X86_INS_CLC: {
+            arch.cf = ctx.bv_val(0, 1);
             break;
         }
             
@@ -548,6 +566,63 @@ void Inst::transfer(ArchState& arch, z3::solver& solver) const {
             break;
         }
             
+        case X86_INS_FADDP: {
+            x86_reg acc_reg;
+            switch (x86->op_count) {
+                case 0: acc_reg = X86_REG_ST1; break;
+                case 1: acc_reg = x86->operands[0].reg; break;
+                default: std::abort();
+            }
+            const Register acc {acc_reg}, src {X86_REG_ST1};
+            acc.write(arch, src.read(arch) + acc.read(arch));
+            arch.fpu.pop();
+            break;
+        }
+            
+        case X86_INS_FIADD: {
+            const Operand src {x86->operands[0]};
+            const z3::expr int_src = src.read(arch, solver);
+            const z3::expr fp_src = z3::sbv_to_fpa(int_src, arch.fpu.fp_sort());
+            const z3::expr acc = arch.fpu.get(0);
+            const z3::expr res = acc + fp_src;
+            arch.fpu.set(0, res);
+            break;
+        }
+            
+        case X86_INS_FLD1: {
+            arch.fpu.push(ctx.fpa_val(0.));
+            break;
+        }
+            
+        case X86_INS_FUCOMI:
+        case X86_INS_FUCOMIP: {
+            assert(x86->op_count == 1);
+            static const std::unordered_map<int, bool> pop = {
+                {X86_INS_FUCOMI, false},
+                {X86_INS_FUCOMIP, true},
+            };
+        
+            const Register src1 {X86_REG_ST0}, src2 {x86->operands[0].reg};
+            const z3::expr src1_val = src1.read(arch);
+            const z3::expr src2_val = src2.read(arch);
+            
+            const auto zf = z3::bool_to_bv(src1_val == src2_val);
+            const auto cf = z3::bool_to_bv(src1_val < src2_val);
+            const auto pf = z3::bool_to_bv(src1_val.mk_is_nan() || src2_val.mk_is_nan());
+            
+            arch.zf = zf | pf;
+            arch.pf = pf;
+            arch.cf = cf | pf;
+            
+            arch.of = arch.sf = ctx.bv_val(0, 1);
+            
+            if (pop.at(I->id)) {
+                arch.fpu.pop();
+            }
+            
+            break;
+        }
+            
         case X86_INS_SIDT: {
             const Operand dst {x86->operands[0]};
             dst.write(arch, ctx.bv_val(0, 8 * 6), solver);
@@ -576,21 +651,28 @@ void Inst::transfer(ArchState& arch, z3::solver& solver) const {
             break;
         }
             
+        case X86_INS_DIV:
         case X86_INS_IDIV: {
+            static const std::unordered_map<int, std::pair<z3::expr (*)(const z3::expr&, unsigned), z3::expr (*)(const z3::expr&, const z3::expr&)>> func_map = {
+                {X86_INS_DIV, {&z3::zext, &z3::udiv}},
+                {X86_INS_IDIV, {&z3::sext, [] (const z3::expr& a, const z3::expr& b) -> z3::expr { return a / b; }}},
+            };
+            const auto [ext, div] = func_map.at(I->id);
+            
             const Operand src {x86->operands[0]};
             z3::expr src_val = src.read(arch, solver);
             const unsigned bits = src.bits();
-            src_val = z3::sext(src_val, bits);
-            static const std::unordered_map<unsigned, std::pair<x86_reg, x86_reg>> map = {
+            src_val = ext(src_val, bits);
+            static const std::unordered_map<unsigned, std::pair<x86_reg, x86_reg>> reg_map = {
                 {8, {X86_REG_AH, X86_REG_AL}},
                 {16, {X86_REG_AX, X86_REG_DX}},
                 {32, {X86_REG_EAX, X86_REG_EDX}},
             };
-            const auto [r_hi, r_lo] = map.at(bits);
+            const auto [r_hi, r_lo] = reg_map.at(bits);
             const Register acc_hi {r_hi};
             const Register acc_lo {r_lo};
             const z3::expr acc_val = z3::concat(acc_hi.read(arch), acc_lo.read(arch));
-            const z3::expr res = acc_val / src_val;
+            const z3::expr res = div(acc_val, src_val);
             acc_hi.write(arch, res.extract(bits * 2 - 1, bits));
             acc_lo.write(arch, res.extract(bits - 1, 0));
             break;

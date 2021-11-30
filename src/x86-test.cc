@@ -78,7 +78,9 @@ int main(int argc, char *argv[]) {
             }
                 
             case 'j': {
-                conf::pool.open(std::stoul(optarg));
+                const unsigned jobs = std::stoul(optarg);
+                conf::pool.open(jobs);
+                conf::parallel = (jobs != 1);
                 break;
             }
                 
